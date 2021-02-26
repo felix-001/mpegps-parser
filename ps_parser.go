@@ -55,7 +55,7 @@ type PsDecoder struct {
 	handlers        map[int]func() error
 }
 
-func (dec *PsDecoder) decPs() ([]byte, error) {
+func (dec *PsDecoder) decodePs() ([]byte, error) {
 	for {
 		startCode, err := dec.br.Read32(32)
 		if err != nil {
@@ -260,7 +260,7 @@ func main() {
 	log.SetFlags(log.Lshortfile)
 	br, _ := NewBitReader(os.Args[1])
 	psDecoder := NewPsDecoder(br)
-	h264, err := psDecoder.decPs()
+	h264, err := psDecoder.decodePs()
 	if err != nil {
 		return
 	}
