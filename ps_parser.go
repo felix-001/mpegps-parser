@@ -266,7 +266,7 @@ func (decoder *PsDecoder) decodePsHeader() error {
 	if err != nil {
 		log.Println("error:", err)
 	}
-	fmt.Print(string(b))
+	fmt.Print(string(b) + "\n")
 	return nil
 }
 
