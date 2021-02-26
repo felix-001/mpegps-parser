@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -260,6 +262,11 @@ func (decoder *PsDecoder) decodePsHeader() error {
 	}
 	pack_stuffing_length := decoder.psHeader["pack_stuffing_length"]
 	decoder.br.Skip(uint(pack_stuffing_length * 8))
+	b, err := json.MarshalIndent(decoder.psHeader, "", "  ")
+	if err != nil {
+		log.Println("error:", err)
+	}
+	fmt.Print(string(b))
 	return nil
 }
 
