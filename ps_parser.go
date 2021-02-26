@@ -167,22 +167,21 @@ func (dec *PsDecoder) decPESPacket() error {
 	br.Skip(16)
 
 	payloadlen -= 2
-	if pesHeaderDataLen, err := br.Read32(8); err != nil {
+	pesHeaderDataLen, err := br.Read32(8)
+	if err != nil {
 		return err
-	} else {
-		log.Printf("\tpes_header_data_length: %d", pesHeaderDataLen)
-		payloadlen--
-		br.Skip(uint(pesHeaderDataLen * 8))
-		payloadlen -= pesHeaderDataLen
 	}
+	log.Printf("\tpes_header_data_length: %d", pesHeaderDataLen)
+	payloadlen--
+	br.Skip(uint(pesHeaderDataLen * 8))
+	payloadlen -= pesHeaderDataLen
 
 	payloaddata := make([]byte, payloadlen)
 	if _, err := io.ReadAtLeast(br, payloaddata, int(payloadlen)); err != nil {
 		return err
-	} else {
-		copy(dec.rawData[dec.rawLen:], payloaddata)
-		dec.rawLen += int(payloadlen)
 	}
+	copy(dec.rawData[dec.rawLen:], payloaddata)
+	dec.rawLen += int(payloadlen)
 	dec.decodeH264(payloaddata)
 
 	return nil
