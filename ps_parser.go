@@ -244,6 +244,7 @@ func NewPsDecoder(br bitreader.BitReader) *PsDecoder {
 		rawData:  make([]byte, MAXFrameLen),
 		rawLen:   0,
 		br:       br,
+		psHeader: make(map[string]uint32),
 		handlers: make(map[int]func() error),
 	}
 	psDecoder.handlers = map[int]func() error{
