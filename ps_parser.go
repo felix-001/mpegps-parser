@@ -183,6 +183,19 @@ func (dec *PsDecoder) decProgramStreamMap() error {
 	return nil
 }
 
+func (dec *PsDecoder) decodeH264(data []byte) error {
+	if data[4] == 0x67 {
+		log.Println("\t\tSPS")
+	}
+	if data[4] == 0x68 {
+		log.Println("\t\tPPS")
+	}
+	if data[4] == 0x65 {
+		log.Println("\t\tIDR")
+	}
+	return nil
+}
+
 func (dec *PsDecoder) decPESPacket() error {
 	br := dec.br
 	payloadlen, err := br.Read32(16)
@@ -209,15 +222,7 @@ func (dec *PsDecoder) decPESPacket() error {
 		copy(dec.rawData[dec.rawLen:], payloaddata)
 		dec.rawLen += int(payloadlen)
 	}
-	if payloaddata[4] == 0x67 {
-		log.Println("\t\tSPS")
-	}
-	if payloaddata[4] == 0x68 {
-		log.Println("\t\tPPS")
-	}
-	if payloaddata[4] == 0x65 {
-		log.Println("\t\tIDR")
-	}
+	dec.decodeH264(payloaddata)
 
 	return nil
 }
