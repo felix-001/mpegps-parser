@@ -98,6 +98,36 @@ func (decoder *PsDecoder) getPos() int64 {
 	return pos
 }
 
+func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
+	br := decoder.br
+	for programStreamMapLen > 0 {
+		streamType, err := br.Read32(8)
+		log.Printf("\t\tstream type: 0x%x", streamType)
+		if err != nil {
+			return err
+		}
+		elementaryStreamID, err := br.Read32(8)
+		if err != nil {
+			return err
+		}
+		if elementaryStreamID >= 0xe0 && elementaryStreamID <= 0xef {
+			decoder.videoStreamType = streamType
+		}
+		if elementaryStreamID >= 0xc0 && elementaryStreamID <= 0xdf {
+			decoder.audioStreamType = streamType
+		}
+		log.Printf("\t\tstream id: 0x%x", elementaryStreamID)
+		elementaryStreamInfoLength, err := br.Read32(16)
+		if err != nil {
+			return err
+		}
+		log.Printf("\t\telementary_stream_info_length: %d", elementaryStreamInfoLength)
+		br.Skip(uint(elementaryStreamInfoLength * 8))
+		programStreamMapLen -= (4 + elementaryStreamInfoLength)
+	}
+	return nil
+}
+
 func (dec *PsDecoder) decodeProgramStreamMap() error {
 	log.Println("=== program stream map ===")
 	br := dec.br
@@ -121,31 +151,9 @@ func (dec *PsDecoder) decodeProgramStreamMap() error {
 	}
 	psmLen -= (2 + programStreamMapLen)
 	log.Printf("\tprogram_stream_info_length: %d", programStreamMapLen)
-	for programStreamMapLen > 0 {
-		streamType, err := br.Read32(8)
-		log.Printf("\t\tstream type: 0x%x", streamType)
-		if err != nil {
-			return err
-		}
-		elementaryStreamID, err := br.Read32(8)
-		if err != nil {
-			return err
-		}
-		if elementaryStreamID >= 0xe0 && elementaryStreamID <= 0xef {
-			dec.videoStreamType = streamType
-		}
-		if elementaryStreamID >= 0xc0 && elementaryStreamID <= 0xdf {
-			dec.audioStreamType = streamType
-		}
-		log.Printf("\t\tstream id: 0x%x", elementaryStreamID)
-		elementaryStreamInfoLength, err := br.Read32(16)
-		if err != nil {
-			return err
-		}
-		log.Printf("\t\telementary_stream_info_length: %d", elementaryStreamInfoLength)
-		br.Skip(uint(elementaryStreamInfoLength * 8))
-		programStreamMapLen -= (4 + elementaryStreamInfoLength)
 
+	if err := dec.decodePsmNLoop(programStreamMapLen); err != nil {
+		return err
 	}
 
 	// crc 32
