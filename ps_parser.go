@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -50,6 +51,7 @@ func (dec *PsDecoder) decodePs() ([]byte, error) {
 			return nil, err
 		}
 		dec.pktCnt++
+		fmt.Println("")
 		log.Printf("pkt count: %d", dec.pktCnt)
 		log.Printf("pos: %d : %d", dec.getPos(), dec.fileSize)
 		handler, ok := dec.handlers[int(startCode)]
@@ -147,7 +149,7 @@ func (dec *PsDecoder) decodeProgramStreamMap() error {
 }
 
 func (dec *PsDecoder) decodeH264(data []byte, len uint32) error {
-	log.Printf("h264 len : %d", len)
+	log.Printf("\t\th264 len : %d", len)
 	if data[4] == 0x67 {
 		log.Println("\t\tSPS")
 	}
