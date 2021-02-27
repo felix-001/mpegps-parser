@@ -12,17 +12,6 @@ import (
 )
 
 const (
-	StreamTypeH264 = 0x1b
-	StreamTypeH265 = 0x24
-	StreamTypeAAC  = 0x90
-)
-
-const (
-	StreamIDVideo = 0xe0
-	StreamIDAudio = 0xc0
-)
-
-const (
 	StartCodePS    = 0x000001ba
 	StartCodeSYS   = 0x000001bb
 	StartCodeMAP   = 0x000001bc
@@ -36,10 +25,8 @@ const (
 
 var (
 	ErrNotFoundStartCode = errors.New("not found the need start code flag")
-	ErrMarkerBit         = errors.New("marker bit value error")
 	ErrFormatPack        = errors.New("not package standard")
 	ErrParsePakcet       = errors.New("parse ps packet error")
-	ErrParseRtp          = errors.New("parse rtp packet error")
 	ErrNewBiteReader     = errors.New("new bit reader error")
 )
 
