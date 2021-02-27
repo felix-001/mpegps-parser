@@ -19,10 +19,6 @@ const (
 	StartCodeAudio = 0x000001c0
 )
 
-const (
-	MAXFrameLen int = 1024 * 1024 * 10
-)
-
 var (
 	ErrNotFoundStartCode = errors.New("not found the need start code flag")
 	ErrFormatPack        = errors.New("not package standard")
@@ -36,8 +32,6 @@ type FieldInfo struct {
 }
 
 type PsDecoder struct {
-	rawData         []byte
-	rawLen          int
 	videoStreamType uint32
 	audioStreamType uint32
 	br              bitreader.BitReader
@@ -123,7 +117,7 @@ func (dec *PsDecoder) decodeProgramStreamMap() error {
 		return err
 	}
 	log.Printf("\tprogram_stream_map_length: %d pos: %d", psmLen, dec.getPos())
-	//drop psm version infor
+	//drop psm version info
 	br.Skip(16)
 	psmLen -= 2
 	programStreamInfoLen, err := br.Read32(16)
@@ -152,7 +146,8 @@ func (dec *PsDecoder) decodeProgramStreamMap() error {
 	return nil
 }
 
-func (dec *PsDecoder) decodeH264(data []byte) error {
+func (dec *PsDecoder) decodeH264(data []byte, len uint32) error {
+	log.Printf("h264 len : %d", len)
 	if data[4] == 0x67 {
 		log.Println("\t\tSPS")
 	}
@@ -192,9 +187,7 @@ func (dec *PsDecoder) decodePESPacket() error {
 	if _, err := io.ReadAtLeast(br, payloaddata, int(payloadlen)); err != nil {
 		return err
 	}
-	copy(dec.rawData[dec.rawLen:], payloaddata)
-	dec.rawLen += int(payloadlen)
-	dec.decodeH264(payloaddata)
+	dec.decodeH264(payloaddata, payloadlen)
 
 	return nil
 }
@@ -235,8 +228,6 @@ func NewBitReader(psFile string) (bitreader.BitReader, int, error) {
 
 func NewPsDecoder(br bitreader.BitReader, fileSize int) *PsDecoder {
 	psDecoder := &PsDecoder{
-		rawData:        make([]byte, MAXFrameLen),
-		rawLen:         0,
 		br:             br,
 		psHeader:       make(map[string]uint32),
 		handlers:       make(map[int]func() error),
