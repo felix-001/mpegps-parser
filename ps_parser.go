@@ -43,12 +43,12 @@ type PsDecoder struct {
 	fileSize        int
 }
 
-func (dec *PsDecoder) decodePs() ([]byte, error) {
+func (dec *PsDecoder) decodePs() error {
 	for {
 		startCode, err := dec.br.Read32(32)
 		if err != nil {
 			log.Println(err)
-			return nil, err
+			return err
 		}
 		dec.pktCnt++
 		fmt.Println("")
@@ -57,10 +57,11 @@ func (dec *PsDecoder) decodePs() ([]byte, error) {
 		handler, ok := dec.handlers[int(startCode)]
 		if !ok {
 			log.Printf("check startCode error: 0x%x\n", startCode)
-			return nil, ErrParsePakcet
+			return ErrParsePakcet
 		}
 		handler()
 	}
+	return nil
 }
 
 func (dec *PsDecoder) decodeSystemHeader() error {
@@ -168,28 +169,28 @@ func (dec *PsDecoder) decodeH264(data []byte, len uint32) error {
 func (dec *PsDecoder) decodePESPacket() error {
 	log.Println("=== video ===")
 	br := dec.br
-	payloadlen, err := br.Read32(16)
+	payloadLen, err := br.Read32(16)
 	if err != nil {
 		return err
 	}
-	log.Printf("\tPES_packet_length: %d", payloadlen)
-	br.Skip(16)
+	log.Printf("\tPES_packet_length: %d", payloadLen)
+	br.Skip(16) // 跳过各种flags,比如pts_dts_flags
 
-	payloadlen -= 2
+	payloadLen -= 2
 	pesHeaderDataLen, err := br.Read32(8)
 	if err != nil {
 		return err
 	}
 	log.Printf("\tpes_header_data_length: %d", pesHeaderDataLen)
-	payloadlen--
+	payloadLen--
 	br.Skip(uint(pesHeaderDataLen * 8))
-	payloadlen -= pesHeaderDataLen
+	payloadLen -= pesHeaderDataLen
 
-	payloaddata := make([]byte, payloadlen)
-	if _, err := io.ReadAtLeast(br, payloaddata, int(payloadlen)); err != nil {
+	payloadData := make([]byte, payloadLen)
+	if _, err := io.ReadAtLeast(br, payloadData, int(payloadLen)); err != nil {
 		return err
 	}
-	dec.decodeH264(payloaddata, payloadlen)
+	dec.decodeH264(payloadData, payloadLen)
 
 	return nil
 }
@@ -215,17 +216,6 @@ func (decoder *PsDecoder) decodePsHeader() error {
 		fmt.Print(string(b) + "\n")
 	*/
 	return nil
-}
-
-func NewBitReader(psFile string) (bitreader.BitReader, int, error) {
-	ps_pkt, err := ioutil.ReadFile(os.Args[1])
-	log.Printf("file size: %d", len(ps_pkt))
-	if err != nil {
-		log.Printf("open file: %s error", os.Args[1])
-		return nil, 0, ErrNewBiteReader
-	}
-	br := bitreader.NewReader(bytes.NewReader(ps_pkt))
-	return br, len(ps_pkt), nil
 }
 
 func NewPsDecoder(br bitreader.BitReader, fileSize int) *PsDecoder {
@@ -264,11 +254,17 @@ func NewPsDecoder(br bitreader.BitReader, fileSize int) *PsDecoder {
 
 func main() {
 	log.SetFlags(log.Lshortfile)
-	br, fileSize, _ := NewBitReader(os.Args[1])
-	psDecoder := NewPsDecoder(br, fileSize)
-	h264, err := psDecoder.decodePs()
+	psFile := os.Args[1]
+	psBuf, err := ioutil.ReadFile(psFile)
+	log.Printf("file size: %d", len(psBuf))
 	if err != nil {
+		log.Printf("open file: %s error", psFile)
 		return
 	}
-	log.Printf("h264 len:%d", len(h264))
+	br := bitreader.NewReader(bytes.NewReader(psBuf))
+	psDecoder := NewPsDecoder(br, len(psBuf))
+	if err := psDecoder.decodePs(); err != nil {
+		log.Println(err)
+		return
+	}
 }
