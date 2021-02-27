@@ -256,11 +256,11 @@ func main() {
 	log.SetFlags(log.Lshortfile)
 	psFile := os.Args[1]
 	psBuf, err := ioutil.ReadFile(psFile)
-	log.Printf("file size: %d", len(psBuf))
 	if err != nil {
 		log.Printf("open file: %s error", psFile)
 		return
 	}
+	log.Printf("file size: %d", len(psBuf))
 	br := bitreader.NewReader(bytes.NewReader(psBuf))
 	psDecoder := NewPsDecoder(br, len(psBuf))
 	if err := psDecoder.decodePs(); err != nil {
