@@ -52,8 +52,7 @@ func (dec *PsDecoder) decodePs() error {
 		}
 		dec.pktCnt++
 		fmt.Println("")
-		log.Printf("pkt count: %d", dec.pktCnt)
-		log.Printf("pos: %d : %d", dec.getPos(), dec.fileSize)
+		log.Printf("pkt count: %d pos: %d : %d", dec.pktCnt, dec.getPos(), dec.fileSize)
 		handler, ok := dec.handlers[int(startCode)]
 		if !ok {
 			log.Printf("check startCode error: 0x%x\n", startCode)
