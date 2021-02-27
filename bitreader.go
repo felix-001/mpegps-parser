@@ -102,14 +102,14 @@ type Aligner interface {
 }
 
 type ByteReader interface {
-    Read(p []byte) (n int, err error)
-    Len() int
-    Size() int64
+	Read(p []byte) (n int, err error)
+	Len() int
+	Size() int64
 }
 
 type BitReader1 interface {
 	//io.Reader
-    ByteReader
+	ByteReader
 
 	Reader
 	Peeker
@@ -119,7 +119,7 @@ type BitReader1 interface {
 
 type BitReader8 interface {
 	//io.Reader
-    ByteReader
+	ByteReader
 
 	Reader8
 	Peeker8
@@ -129,7 +129,7 @@ type BitReader8 interface {
 
 type BitReader16 interface {
 	//io.Reader
-    ByteReader
+	ByteReader
 
 	Reader16
 	Peeker16
@@ -137,34 +137,31 @@ type BitReader16 interface {
 	Aligner
 }
 
-
 type BitReader32 interface {
 	//io.Reader
 
-    ByteReader
+	ByteReader
 	Reader32
 	Peeker32
 	Skipper
 	Aligner
 }
 
-
 type BitReader interface {
 	//io.Reader
-    ByteReader
+	ByteReader
 	Reader64
 	Peeker64
 	Skipper
 	Aligner
-    //Offset() int
+	//Offset() int
 }
-
 
 // NewBitReader returns the default implementation of a BitReader
-func NewReader(r ByteReader) BitReader {
-	return &bitreader{r: r}
+func NewReader(r ByteReader) BitReader { // BitReader是一个接口, bitreader实现了
+	// 这个接口
+	return &bitreader{r: r} // 这里面的r是bytes.Reader,标准库中的
 }
-
 
 type bitreader struct {
 	r         ByteReader
@@ -280,16 +277,22 @@ func (br *bitreader) Peek64(n uint) (uint64, error) {
 }
 
 func (br *bitreader) fill() error {
+	// 第一次的时候br.remaining是0，这里的total值是8
 	total := (64 - br.remaining) >> 3
 
-	n, err := br.r.Read(br.raw[:total])
+	// 这里边传入的br.raw[:total]是一个输出参数，是一个slice
+	// Read函数内部根据slice的长度输出数据的长度
+	n, err := br.r.Read(br.raw[:total]) // r是标准库的byteReader
 	if err != nil {
 		return err
 	}
-
+	// n是读出来个字节数
 	ir := br.remaining
+	// 这里是把读取出来的8个字节的slice转换成int64
+	// br.remaining指示int64的bufer中有多少个bit没有被读出
 	for i := 0; i < n; i++ {
 		pos := 64 - 8 - (uint(i) << 3) - ir
+		// br.buffer的类型是int64, 8个字节
 		br.buffer |= uint64(br.raw[i]) << pos
 		br.remaining += 8
 	}
@@ -343,12 +346,15 @@ func (br *bitreader) skip(n uint) error {
 	return nil
 }
 
+// Len是没有被读的byte数
 func (br *bitreader) Len() int {
-    return br.r.Len()
+	// 每次读取8个字节，有可能int64 buffer里面还没有读出来的数据
+	return br.r.Len() + int(br.remaining/8)
 }
 
+// size是总长度
 func (br *bitreader) Size() int64 {
-    return br.r.Size()
+	return br.r.Size()
 }
 
 func checkEOF(err error) error {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ var (
 	ErrFormatPack        = errors.New("not package standard")
 	ErrParsePakcet       = errors.New("parse ps packet error")
 	ErrNewBiteReader     = errors.New("new bit reader error")
+	ErrCheckH264         = errors.New("check h264 error")
 )
 
 type FieldInfo struct {
@@ -41,6 +43,7 @@ type PsDecoder struct {
 	psHeaderFields  []FieldInfo
 	pktCnt          int
 	fileSize        int
+	psBuf           *[]byte
 }
 
 func (dec *PsDecoder) decodePs() error {
@@ -165,6 +168,17 @@ func (dec *PsDecoder) decodeH264(data []byte, len uint32) error {
 	return nil
 }
 
+func (dec *PsDecoder) checkH264(h264Len uint32) bool {
+	psBuf := *dec.psBuf
+	pos := dec.getPos() + int64(h264Len)
+	packStartCode := binary.BigEndian.Uint32(psBuf[pos : pos+4])
+	if packStartCode>>8 != 0x000001 {
+		log.Printf("check start code error: 0x%x pos: %d", packStartCode, dec.getPos())
+		return false
+	}
+	return true
+}
+
 func (dec *PsDecoder) decodePESPacket() error {
 	log.Println("=== video ===")
 	br := dec.br
@@ -184,7 +198,10 @@ func (dec *PsDecoder) decodePESPacket() error {
 	payloadLen--
 	br.Skip(uint(pesHeaderDataLen * 8))
 	payloadLen -= pesHeaderDataLen
-
+	if !dec.checkH264(payloadLen) {
+		log.Println("check h264 error")
+		return ErrCheckH264
+	}
 	payloadData := make([]byte, payloadLen)
 	if _, err := io.ReadAtLeast(br, payloadData, int(payloadLen)); err != nil {
 		return err
@@ -217,13 +234,14 @@ func (decoder *PsDecoder) decodePsHeader() error {
 	return nil
 }
 
-func NewPsDecoder(br bitreader.BitReader, fileSize int) *PsDecoder {
+func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int) *PsDecoder {
 	psDecoder := &PsDecoder{
 		br:             br,
 		psHeader:       make(map[string]uint32),
 		handlers:       make(map[int]func() error),
 		psHeaderFields: make([]FieldInfo, 14),
 		fileSize:       fileSize,
+		psBuf:          psBuf,
 	}
 	psDecoder.handlers = map[int]func() error{
 		StartCodePS:    psDecoder.decodePsHeader,
@@ -261,7 +279,7 @@ func main() {
 	}
 	log.Printf("file size: %d", len(psBuf))
 	br := bitreader.NewReader(bytes.NewReader(psBuf))
-	psDecoder := NewPsDecoder(br, len(psBuf))
+	psDecoder := NewPsDecoder(br, &psBuf, len(psBuf))
 	if err := psDecoder.decodePs(); err != nil {
 		log.Println(err)
 		return
