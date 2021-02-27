@@ -2,9 +2,7 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -45,6 +43,11 @@ var (
 	ErrNewBiteReader     = errors.New("new bit reader error")
 )
 
+type FieldInfo struct {
+	len  uint
+	item string
+}
+
 type PsDecoder struct {
 	rawData         []byte
 	rawLen          int
@@ -53,6 +56,9 @@ type PsDecoder struct {
 	br              bitreader.BitReader
 	psHeader        map[string]uint32
 	handlers        map[int]func() error
+	psHeaderFields  []FieldInfo
+	pktCnt          int
+	fileSize        int
 }
 
 func (dec *PsDecoder) decodePs() ([]byte, error) {
@@ -62,6 +68,9 @@ func (dec *PsDecoder) decodePs() ([]byte, error) {
 			log.Println(err)
 			return nil, err
 		}
+		dec.pktCnt++
+		log.Printf("pkt count: %d", dec.pktCnt)
+		log.Printf("pos: %d : %d", dec.getPos(), dec.fileSize)
 		handler, ok := dec.handlers[int(startCode)]
 		if !ok {
 			log.Printf("check startCode error: 0x%x\n", startCode)
@@ -71,7 +80,7 @@ func (dec *PsDecoder) decodePs() ([]byte, error) {
 	}
 }
 
-func (dec *PsDecoder) decSystemHeader() error {
+func (dec *PsDecoder) decodeSystemHeader() error {
 	log.Println("=== ps system header === ")
 	br := dec.br
 	syslens, err := br.Read32(16)
@@ -84,14 +93,19 @@ func (dec *PsDecoder) decSystemHeader() error {
 	return nil
 }
 
-func (dec *PsDecoder) decProgramStreamMap() error {
+func (decoder *PsDecoder) getPos() int64 {
+	pos := decoder.br.Size() - int64(decoder.br.Len())
+	return pos
+}
+
+func (dec *PsDecoder) decodeProgramStreamMap() error {
 	log.Println("=== program stream map ===")
 	br := dec.br
 	psmLen, err := br.Read32(16)
 	if err != nil {
 		return err
 	}
-	//log.Printf("\tprogram_stream_map_length: %d pos: %d", psmLen, br.Size() - int64(br.Len()))
+	log.Printf("\tprogram_stream_map_length: %d pos: %d", psmLen, dec.getPos())
 	//drop psm version infor
 	br.Skip(16)
 	psmLen -= 2
@@ -153,10 +167,13 @@ func (dec *PsDecoder) decodeH264(data []byte) error {
 	if data[4] == 0x65 {
 		log.Println("\t\tIDR")
 	}
+	if data[4] == 0x61 {
+		log.Println("\t\tP Frame")
+	}
 	return nil
 }
 
-func (dec *PsDecoder) decPESPacket() error {
+func (dec *PsDecoder) decodePESPacket() error {
 	log.Println("=== video ===")
 	br := dec.br
 	payloadlen, err := br.Read32(16)
@@ -187,31 +204,10 @@ func (dec *PsDecoder) decPESPacket() error {
 	return nil
 }
 
-type FieldInfo struct {
-	len  uint
-	item string
-}
-
-var psheaderFields = []FieldInfo{
-	{2, "fixed"},
-	{3, "system_clock_refrence_base1"},
-	{1, "marker_bit1"},
-	{15, "system_clock_refrence_base2"},
-	{1, "marker_bit2"},
-	{15, "system_clock_refrence_base3"},
-	{1, "marker_bit3"},
-	{9, "system_clock_reference_extension"},
-	{1, "marker_bit4"},
-	{22, "program_mux_rate"},
-	{1, "marker_bit5"},
-	{1, "marker_bit6"},
-	{5, "reserved"},
-	{3, "pack_stuffing_length"},
-}
-
 func (decoder *PsDecoder) decodePsHeader() error {
-	log.Println("=== ps header ===")
-	for _, field := range psheaderFields {
+	log.Println("=== pack header ===")
+	psHeaderFields := decoder.psHeaderFields
+	for _, field := range psHeaderFields {
 		val, err := decoder.br.Read32(field.len)
 		if err != nil {
 			log.Printf("parse %s error", field.item)
@@ -221,46 +217,67 @@ func (decoder *PsDecoder) decodePsHeader() error {
 	}
 	pack_stuffing_length := decoder.psHeader["pack_stuffing_length"]
 	decoder.br.Skip(uint(pack_stuffing_length * 8))
-	b, err := json.MarshalIndent(decoder.psHeader, "", "  ")
-	if err != nil {
-		log.Println("error:", err)
-	}
-	fmt.Print(string(b) + "\n")
+	/*
+		b, err := json.MarshalIndent(decoder.psHeader, "", "  ")
+		if err != nil {
+			log.Println("error:", err)
+		}
+		fmt.Print(string(b) + "\n")
+	*/
 	return nil
 }
 
-func NewBitReader(psFile string) (bitreader.BitReader, error) {
+func NewBitReader(psFile string) (bitreader.BitReader, int, error) {
 	ps_pkt, err := ioutil.ReadFile(os.Args[1])
+	log.Printf("file size: %d", len(ps_pkt))
 	if err != nil {
 		log.Printf("open file: %s error", os.Args[1])
-		return nil, ErrNewBiteReader
+		return nil, 0, ErrNewBiteReader
 	}
 	br := bitreader.NewReader(bytes.NewReader(ps_pkt))
-	return br, nil
+	return br, len(ps_pkt), nil
 }
 
-func NewPsDecoder(br bitreader.BitReader) *PsDecoder {
+func NewPsDecoder(br bitreader.BitReader, fileSize int) *PsDecoder {
 	psDecoder := &PsDecoder{
-		rawData:  make([]byte, MAXFrameLen),
-		rawLen:   0,
-		br:       br,
-		psHeader: make(map[string]uint32),
-		handlers: make(map[int]func() error),
+		rawData:        make([]byte, MAXFrameLen),
+		rawLen:         0,
+		br:             br,
+		psHeader:       make(map[string]uint32),
+		handlers:       make(map[int]func() error),
+		psHeaderFields: make([]FieldInfo, 14),
+		fileSize:       fileSize,
 	}
 	psDecoder.handlers = map[int]func() error{
 		StartCodePS:    psDecoder.decodePsHeader,
-		StartCodeSYS:   psDecoder.decSystemHeader,
-		StartCodeMAP:   psDecoder.decProgramStreamMap,
-		StartCodeVideo: psDecoder.decPESPacket,
-		StartCodeAudio: psDecoder.decPESPacket,
+		StartCodeSYS:   psDecoder.decodeSystemHeader,
+		StartCodeMAP:   psDecoder.decodeProgramStreamMap,
+		StartCodeVideo: psDecoder.decodePESPacket,
+		StartCodeAudio: psDecoder.decodePESPacket,
+	}
+	psDecoder.psHeaderFields = []FieldInfo{
+		{2, "fixed"},
+		{3, "system_clock_refrence_base1"},
+		{1, "marker_bit1"},
+		{15, "system_clock_refrence_base2"},
+		{1, "marker_bit2"},
+		{15, "system_clock_refrence_base3"},
+		{1, "marker_bit3"},
+		{9, "system_clock_reference_extension"},
+		{1, "marker_bit4"},
+		{22, "program_mux_rate"},
+		{1, "marker_bit5"},
+		{1, "marker_bit6"},
+		{5, "reserved"},
+		{3, "pack_stuffing_length"},
 	}
 	return psDecoder
 }
 
 func main() {
 	log.SetFlags(log.Lshortfile)
-	br, _ := NewBitReader(os.Args[1])
-	psDecoder := NewPsDecoder(br)
+	br, fileSize, _ := NewBitReader(os.Args[1])
+	psDecoder := NewPsDecoder(br, fileSize)
 	h264, err := psDecoder.decodePs()
 	if err != nil {
 		return
