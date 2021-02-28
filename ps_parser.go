@@ -302,18 +302,11 @@ func (dec *PsDecoder) writeH264FrameToFile(frame []byte) error {
 
 func (dec *PsDecoder) openH264File() error {
 	file := "./output.h264"
-	if _, err := os.Stat(file); os.IsNotExist(err) {
-		dec.h264File, err = os.Create(file)
-		if err != nil {
-			log.Println(err)
-			return err
-		}
-	} else {
-		dec.h264File, err = os.OpenFile(file, os.O_APPEND, 0666)
-		if err != nil {
-			log.Println(err)
-			return err
-		}
+	var err error
+	dec.h264File, err = os.OpenFile(file, os.O_WRONLY|os.O_CREATE, 0666)
+	if err != nil {
+		log.Println(err)
+		return err
 	}
 	return nil
 }
