@@ -46,6 +46,7 @@ type PsDecoder struct {
 	errVideoFrameCnt   int
 	totalVideoFrameCnt int
 	iFrameCnt          int
+	psmCnt             int
 }
 
 func (dec *PsDecoder) decodePsPkts() error {
