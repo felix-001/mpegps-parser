@@ -330,6 +330,6 @@ func main() {
 	fmt.Println("")
 	log.Printf("total frame count: %d\n", psDecoder.totalVideoFrameCnt)
 	log.Printf("err frame cont: %d\n", psDecoder.errVideoFrameCnt)
-	log.Printf("i frame count: %d\n", psDecoder.iFrameCnt)
+	log.Printf("I frame count: %d\n", psDecoder.iFrameCnt)
 	log.Printf("program stream map count: %d", psDecoder.psmCnt)
 }
