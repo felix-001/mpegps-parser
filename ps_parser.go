@@ -34,19 +34,22 @@ type FieldInfo struct {
 }
 
 type PsDecoder struct {
-	videoStreamType uint32
-	audioStreamType uint32
-	br              bitreader.BitReader
-	psHeader        map[string]uint32
-	handlers        map[int]func() error
-	psHeaderFields  []FieldInfo
-	pktCnt          int
-	fileSize        int
-	psBuf           *[]byte
+	videoStreamType    uint32
+	audioStreamType    uint32
+	br                 bitreader.BitReader
+	psHeader           map[string]uint32
+	handlers           map[int]func() error
+	psHeaderFields     []FieldInfo
+	pktCnt             int
+	fileSize           int
+	psBuf              *[]byte
+	errVideoFrameCnt   int
+	totalVideoFrameCnt int
+	iFrameCnt          int
 }
 
-func (dec *PsDecoder) decodePs() error {
-	for {
+func (dec *PsDecoder) decodePsPkts() error {
+	for dec.getPos() < int64(dec.fileSize) {
 		startCode, err := dec.br.Read32(32)
 		if err != nil {
 			log.Println(err)
@@ -160,6 +163,7 @@ func (dec *PsDecoder) decodeH264(data []byte, len uint32) error {
 	}
 	if data[4] == 0x65 {
 		log.Println("\t\tIDR")
+		dec.iFrameCnt++
 	}
 	if data[4] == 0x61 {
 		log.Println("\t\tP Frame")
@@ -189,22 +193,23 @@ func (dec *PsDecoder) checkH264(h264Len uint32) bool {
 	return true
 }
 
-func (dec *PsDecoder) GetNextPackPos() (int, error) {
+func (dec *PsDecoder) GetNextPackPos() (int, bool) {
 	pos := int(dec.getPos())
 	for pos < dec.fileSize-4 {
 		b := (*dec.psBuf)[pos : pos+4]
 		packStartCode := binary.BigEndian.Uint32(b)
 		if dec.isStartCodeValid((packStartCode)) {
-			return pos, nil
+			return pos, false
 		}
 		pos++
 	}
-	return 0, ErrNotFoundStartCode
+	return 0, true
 }
 
 func (dec *PsDecoder) decodePESPacket() error {
 	log.Println("=== video ===")
 	br := dec.br
+	dec.totalVideoFrameCnt++
 	payloadLen, err := br.Read32(16)
 	if err != nil {
 		return err
@@ -222,22 +227,21 @@ func (dec *PsDecoder) decodePESPacket() error {
 	br.Skip(uint(pesHeaderDataLen * 8))
 	payloadLen -= pesHeaderDataLen
 	if !dec.checkH264(payloadLen) {
+		dec.errVideoFrameCnt++
 		log.Println("check h264 error")
-		pos, err := dec.GetNextPackPos()
-		if err != nil {
-			log.Println(err)
-			return err
+		pos, end := dec.GetNextPackPos()
+		if !end {
+			log.Printf("% X\n", (*dec.psBuf)[pos:pos+32])
+			log.Printf("skip pos: %d", pos)
+			skipLen := pos - int(dec.getPos())
+			log.Printf("skip len: %d", skipLen)
+			skipBuf := make([]byte, skipLen)
+			if _, err := io.ReadAtLeast(br, skipBuf, int(skipLen)); err != nil {
+				log.Println(err)
+				return err
+			}
+			return ErrCheckH264
 		}
-		log.Printf("% X\n", (*dec.psBuf)[pos:pos+32])
-		log.Printf("skip pos: %d", pos)
-		skipLen := pos - int(dec.getPos())
-		log.Printf("skip len: %d", skipLen)
-		skipBuf := make([]byte, skipLen)
-		if _, err := io.ReadAtLeast(br, skipBuf, int(skipLen)); err != nil {
-			log.Println(err)
-			return err
-		}
-		return ErrCheckH264
 	}
 	payloadData := make([]byte, payloadLen)
 	if _, err := io.ReadAtLeast(br, payloadData, int(payloadLen)); err != nil {
@@ -317,8 +321,11 @@ func main() {
 	log.Printf("file size: %d", len(psBuf))
 	br := bitreader.NewReader(bytes.NewReader(psBuf))
 	psDecoder := NewPsDecoder(br, &psBuf, len(psBuf))
-	if err := psDecoder.decodePs(); err != nil {
+	if err := psDecoder.decodePsPkts(); err != nil {
 		log.Println(err)
 		return
 	}
+	log.Printf("total frame count: %d err frame count: %d i frame count: %d",
+		psDecoder.totalVideoFrameCnt, psDecoder.errVideoFrameCnt,
+		psDecoder.iFrameCnt)
 }
