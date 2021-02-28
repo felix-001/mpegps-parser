@@ -8,9 +8,8 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"mpegps-parser/bitreader"
 	"os"
-
-	"github.com/32bitkid/bitreader"
 )
 
 const (
@@ -55,7 +54,7 @@ func (dec *PsDecoder) decodePs() error {
 		}
 		dec.pktCnt++
 		fmt.Println("")
-		log.Printf("pkt count: %d pos: %d : %d", dec.pktCnt, dec.getPos(), dec.fileSize)
+		log.Printf("pkt count: %d pos: %d/%d", dec.pktCnt, dec.getPos(), dec.fileSize)
 		handler, ok := dec.handlers[int(startCode)]
 		if !ok {
 			log.Printf("check startCode error: 0x%x\n", startCode)
@@ -168,15 +167,39 @@ func (dec *PsDecoder) decodeH264(data []byte, len uint32) error {
 	return nil
 }
 
+func (dec *PsDecoder) isStartCodeValid(startCode uint32) bool {
+	if startCode == StartCodePS ||
+		startCode == StartCodeMAP ||
+		startCode == StartCodeSYS ||
+		startCode == StartCodeVideo ||
+		startCode == StartCodeAudio {
+		return true
+	}
+	return false
+}
+
 func (dec *PsDecoder) checkH264(h264Len uint32) bool {
 	psBuf := *dec.psBuf
 	pos := dec.getPos() + int64(h264Len)
 	packStartCode := binary.BigEndian.Uint32(psBuf[pos : pos+4])
-	if packStartCode>>8 != 0x000001 {
+	if !dec.isStartCodeValid(packStartCode) {
 		log.Printf("check start code error: 0x%x pos: %d", packStartCode, dec.getPos())
 		return false
 	}
 	return true
+}
+
+func (dec *PsDecoder) GetNextPackPos() (int, error) {
+	pos := int(dec.getPos())
+	for pos < dec.fileSize-4 {
+		b := (*dec.psBuf)[pos : pos+4]
+		packStartCode := binary.BigEndian.Uint32(b)
+		if dec.isStartCodeValid((packStartCode)) {
+			return pos, nil
+		}
+		pos++
+	}
+	return 0, ErrNotFoundStartCode
 }
 
 func (dec *PsDecoder) decodePESPacket() error {
@@ -200,6 +223,20 @@ func (dec *PsDecoder) decodePESPacket() error {
 	payloadLen -= pesHeaderDataLen
 	if !dec.checkH264(payloadLen) {
 		log.Println("check h264 error")
+		pos, err := dec.GetNextPackPos()
+		if err != nil {
+			log.Println(err)
+			return err
+		}
+		log.Printf("% X\n", (*dec.psBuf)[pos:pos+32])
+		log.Printf("skip pos: %d", pos)
+		skipLen := pos - int(dec.getPos())
+		log.Printf("skip len: %d", skipLen)
+		skipBuf := make([]byte, skipLen)
+		if _, err := io.ReadAtLeast(br, skipBuf, int(skipLen)); err != nil {
+			log.Println(err)
+			return err
+		}
 		return ErrCheckH264
 	}
 	payloadData := make([]byte, payloadLen)
