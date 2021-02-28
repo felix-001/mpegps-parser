@@ -48,6 +48,7 @@ type PsDecoder struct {
 	iFrameCnt          int
 	psmCnt             int
 	errIFrameCnt       int
+	pFrameCnt          int
 }
 
 func (dec *PsDecoder) decodePsPkts() error {
@@ -174,6 +175,7 @@ func (dec *PsDecoder) decodeH264(data []byte, len uint32, err bool) error {
 	}
 	if data[4] == 0x61 {
 		log.Println("\t\tP Frame")
+		dec.pFrameCnt++
 	}
 	return nil
 }
@@ -341,4 +343,5 @@ func main() {
 	log.Printf("I frame count: %d\n", psDecoder.iFrameCnt)
 	log.Printf("err I frame count: %d\n", psDecoder.errIFrameCnt)
 	log.Printf("program stream map count: %d", psDecoder.psmCnt)
+	log.Printf("P frame count: %d\n", psDecoder.pFrameCnt)
 }
