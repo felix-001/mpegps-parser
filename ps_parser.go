@@ -325,7 +325,8 @@ func main() {
 		log.Println(err)
 		return
 	}
-	log.Printf("total frame count: %d err frame count: %d i frame count: %d",
-		psDecoder.totalVideoFrameCnt, psDecoder.errVideoFrameCnt,
-		psDecoder.iFrameCnt)
+	fmt.Println("")
+	log.Printf("total frame count: %d\n", psDecoder.totalVideoFrameCnt)
+	log.Printf("err frame cont: %d\n", psDecoder.errVideoFrameCnt)
+	log.Printf("i frame count: %d\n", psDecoder.iFrameCnt)
 }
