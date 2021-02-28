@@ -240,7 +240,7 @@ func (dec *PsDecoder) decodePESPacket() error {
 		if !end {
 			log.Printf("h264 len err, expect: %d actual: %d",
 				payloadLen, int64(pos)-dec.getPos())
-			log.Printf("% X\n", (*dec.psBuf)[pos:pos+32])
+			//log.Printf("% X\n", (*dec.psBuf)[pos:pos+32])
 			log.Printf("skip pos: %d", pos)
 			skipLen := pos - int(dec.getPos())
 			log.Printf("skip len: %d", skipLen)
