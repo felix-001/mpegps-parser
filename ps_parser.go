@@ -49,6 +49,7 @@ type PsDecoder struct {
 	psmCnt             int
 	errIFrameCnt       int
 	pFrameCnt          int
+	h264File           *os.File
 }
 
 func (dec *PsDecoder) decodePsPkts() error {
@@ -177,6 +178,9 @@ func (dec *PsDecoder) decodeH264(data []byte, len uint32, err bool) error {
 		log.Println("\t\tP Frame")
 		dec.pFrameCnt++
 	}
+	if !err {
+		dec.writeH264FrameToFile(data)
+	}
 	return nil
 }
 
@@ -287,6 +291,33 @@ func (decoder *PsDecoder) decodePsHeader() error {
 	return nil
 }
 
+func (dec *PsDecoder) writeH264FrameToFile(frame []byte) error {
+	if _, err := dec.h264File.Write(frame); err != nil {
+		log.Println(err)
+		return err
+	}
+	dec.h264File.Sync()
+	return nil
+}
+
+func (dec *PsDecoder) openH264File() error {
+	file := "./output.h264"
+	if _, err := os.Stat(file); os.IsNotExist(err) {
+		dec.h264File, err = os.Create(file)
+		if err != nil {
+			log.Println(err)
+			return err
+		}
+	} else {
+		dec.h264File, err = os.OpenFile(file, os.O_APPEND, 0666)
+		if err != nil {
+			log.Println(err)
+			return err
+		}
+	}
+	return nil
+}
+
 func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int) *PsDecoder {
 	psDecoder := &PsDecoder{
 		br:             br,
@@ -333,6 +364,7 @@ func main() {
 	log.Printf("file size: %d", len(psBuf))
 	br := bitreader.NewReader(bytes.NewReader(psBuf))
 	psDecoder := NewPsDecoder(br, &psBuf, len(psBuf))
+	psDecoder.openH264File()
 	if err := psDecoder.decodePsPkts(); err != nil {
 		log.Println(err)
 		return
