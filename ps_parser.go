@@ -47,6 +47,7 @@ type PsDecoder struct {
 	totalVideoFrameCnt int
 	iFrameCnt          int
 	psmCnt             int
+	errIFrameCnt       int
 }
 
 func (dec *PsDecoder) decodePsPkts() error {
@@ -155,7 +156,7 @@ func (dec *PsDecoder) decodeProgramStreamMap() error {
 	return nil
 }
 
-func (dec *PsDecoder) decodeH264(data []byte, len uint32) error {
+func (dec *PsDecoder) decodeH264(data []byte, len uint32, err bool) error {
 	log.Printf("\t\th264 len : %d", len)
 	if data[4] == 0x67 {
 		log.Println("\t\tSPS")
@@ -165,7 +166,11 @@ func (dec *PsDecoder) decodeH264(data []byte, len uint32) error {
 	}
 	if data[4] == 0x65 {
 		log.Println("\t\tIDR")
-		dec.iFrameCnt++
+		if err {
+			dec.errIFrameCnt++
+		} else {
+			dec.iFrameCnt++
+		}
 	}
 	if data[4] == 0x61 {
 		log.Println("\t\tP Frame")
@@ -242,6 +247,7 @@ func (dec *PsDecoder) decodePESPacket() error {
 				log.Println(err)
 				return err
 			}
+			dec.decodeH264(skipBuf, uint32(skipLen), true)
 			return ErrCheckH264
 		}
 	}
@@ -249,7 +255,7 @@ func (dec *PsDecoder) decodePESPacket() error {
 	if _, err := io.ReadAtLeast(br, payloadData, int(payloadLen)); err != nil {
 		return err
 	}
-	dec.decodeH264(payloadData, payloadLen)
+	dec.decodeH264(payloadData, payloadLen, false)
 
 	return nil
 }
@@ -331,5 +337,6 @@ func main() {
 	log.Printf("total frame count: %d\n", psDecoder.totalVideoFrameCnt)
 	log.Printf("err frame cont: %d\n", psDecoder.errVideoFrameCnt)
 	log.Printf("I frame count: %d\n", psDecoder.iFrameCnt)
+	log.Printf("err I frame count: %d\n", psDecoder.errIFrameCnt)
 	log.Printf("program stream map count: %d", psDecoder.psmCnt)
 }
