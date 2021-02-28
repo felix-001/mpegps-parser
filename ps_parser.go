@@ -120,6 +120,7 @@ func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
 func (dec *PsDecoder) decodeProgramStreamMap() error {
 	log.Println("=== program stream map ===")
 	br := dec.br
+	dec.psmCnt++
 	psmLen, err := br.Read32(16)
 	if err != nil {
 		return err
@@ -330,4 +331,5 @@ func main() {
 	log.Printf("total frame count: %d\n", psDecoder.totalVideoFrameCnt)
 	log.Printf("err frame cont: %d\n", psDecoder.errVideoFrameCnt)
 	log.Printf("i frame count: %d\n", psDecoder.iFrameCnt)
+	log.Printf("program stream map count: %d", psDecoder.psmCnt)
 }
