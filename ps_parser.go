@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -44,12 +45,15 @@ type PsDecoder struct {
 	fileSize           int
 	psBuf              *[]byte
 	errVideoFrameCnt   int
+	errAudioFrameCnt   int
 	totalVideoFrameCnt int
+	totalAudioFrameCnt int
 	iFrameCnt          int
 	psmCnt             int
 	errIFrameCnt       int
 	pFrameCnt          int
 	h264File           *os.File
+	audioFile          *os.File
 }
 
 func (dec *PsDecoder) decodePsPkts() error {
@@ -178,8 +182,16 @@ func (dec *PsDecoder) decodeH264(data []byte, len uint32, err bool) error {
 		log.Println("\t\tP Frame")
 		dec.pFrameCnt++
 	}
-	if !err {
+	if !err && dec.h264File != nil {
 		dec.writeH264FrameToFile(data)
+	}
+	return nil
+}
+
+func (dec *PsDecoder) saveAudioPkt(data []byte, len uint32, err bool) error {
+	log.Printf("\t\taudio len : %d", len)
+	if !err && dec.audioFile != nil {
+		dec.writeAudioFrameToFile(data)
 	}
 	return nil
 }
@@ -206,6 +218,19 @@ func (dec *PsDecoder) checkH264(h264Len uint32) bool {
 	return true
 }
 
+// 移动到当前位置+payloadLen位置，判断startcode是否正确
+// 如果startcode不正确，说明payloadLen是错误的
+func (dec *PsDecoder) isPayloadLenValid(audioLen uint32) bool {
+	psBuf := *dec.psBuf
+	pos := dec.getPos() + int64(audioLen)
+	packStartCode := binary.BigEndian.Uint32(psBuf[pos : pos+4])
+	if !dec.isStartCodeValid(packStartCode) {
+		log.Printf("check payload len error: 0x%x pos: %d", packStartCode, dec.getPos())
+		return false
+	}
+	return true
+}
+
 func (dec *PsDecoder) GetNextPackPos() (int, bool) {
 	pos := int(dec.getPos())
 	for pos < dec.fileSize-4 {
@@ -219,7 +244,63 @@ func (dec *PsDecoder) GetNextPackPos() (int, bool) {
 	return 0, true
 }
 
-func (dec *PsDecoder) decodePESPacket() error {
+func (dec *PsDecoder) skipInvalidBytes(payloadLen int) error {
+	dec.errAudioFrameCnt++
+	log.Println("check audio error")
+	br := dec.br
+	pos, end := dec.GetNextPackPos()
+	if !end {
+		log.Printf("audio len err, expect: %d actual: %d",
+			payloadLen, int64(pos)-dec.getPos())
+		//log.Printf("% X\n", (*dec.psBuf)[pos:pos+32])
+		log.Printf("skip pos: %d", pos)
+		skipLen := pos - int(dec.getPos())
+		log.Printf("skip len: %d", skipLen)
+		skipBuf := make([]byte, skipLen)
+		// 由于payloadLen是错误的，所以下一个startcode和当前位置之间的字节需要丢弃
+		if _, err := io.ReadAtLeast(br, skipBuf, int(skipLen)); err != nil {
+			log.Println(err)
+			return err
+		}
+		dec.saveAudio(skipBuf, uint32(skipLen), true)
+		return ErrCheckH264
+	}
+	return nil
+}
+
+func (dec *PsDecoder) decodeAudioPes() error {
+	log.Println("=== Audio ===")
+	br := dec.br
+	dec.totalAudioFrameCnt++
+	payloadLen, err := br.Read32(16)
+	if err != nil {
+		return err
+	}
+	log.Printf("\tPES_packet_length: %d", payloadLen)
+	br.Skip(16) // 跳过各种flags,比如pts_dts_flags
+
+	payloadLen -= 2
+	pesHeaderDataLen, err := br.Read32(8)
+	if err != nil {
+		return err
+	}
+	log.Printf("\tpes_header_data_length: %d", pesHeaderDataLen)
+	payloadLen-- // payloadLen包含pesHeaderDataLen这个字段的长度，占用一个字节
+	br.Skip(uint(pesHeaderDataLen * 8))
+	payloadLen -= pesHeaderDataLen // payloadLen 包含pesHeaderDataLen的长度
+	if !dec.isPayloadLenValid(payloadLen) {
+		return dec.skipInvalidBytes(payloadLen)
+	}
+	payloadData := make([]byte, payloadLen) // 这里的payloadLen就是实际音频的长度了
+	if _, err := io.ReadAtLeast(br, payloadData, int(payloadLen)); err != nil {
+		return err
+	}
+	dec.saveAudioPkt(payloadData, payloadLen, false)
+
+	return nil
+}
+
+func (dec *PsDecoder) decodeVideoPes() error {
 	log.Println("=== video ===")
 	br := dec.br
 	dec.totalVideoFrameCnt++
@@ -300,8 +381,17 @@ func (dec *PsDecoder) writeH264FrameToFile(frame []byte) error {
 	return nil
 }
 
-func (dec *PsDecoder) openH264File() error {
-	file := "./output.h264"
+func (dec *PsDecoder) writeAudioFrameToFile(frame []byte) error {
+	if _, err := dec.audioFile.Write(frame); err != nil {
+		log.Println(err)
+		return err
+	}
+	dec.audioFile.Sync()
+	return nil
+}
+
+func (dec *PsDecoder) openVideoFile() error {
+	file := "./output.video"
 	var err error
 	dec.h264File, err = os.OpenFile(file, os.O_WRONLY|os.O_CREATE, 0666)
 	if err != nil {
@@ -311,8 +401,19 @@ func (dec *PsDecoder) openH264File() error {
 	return nil
 }
 
-func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int) *PsDecoder {
-	psDecoder := &PsDecoder{
+func (dec *PsDecoder) openAudioFile() error {
+	file := "./output.audio"
+	var err error
+	dec.audioFile, err = os.OpenFile(file, os.O_WRONLY|os.O_CREATE, 0666)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	return nil
+}
+
+func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int, dumpAudio, dumpVideo bool) *PsDecoder {
+	decoder := &PsDecoder{
 		br:             br,
 		psHeader:       make(map[string]uint32),
 		handlers:       make(map[int]func() error),
@@ -320,14 +421,14 @@ func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int) *PsDecode
 		fileSize:       fileSize,
 		psBuf:          psBuf,
 	}
-	psDecoder.handlers = map[int]func() error{
-		StartCodePS:    psDecoder.decodePsHeader,
-		StartCodeSYS:   psDecoder.decodeSystemHeader,
-		StartCodeMAP:   psDecoder.decodeProgramStreamMap,
-		StartCodeVideo: psDecoder.decodePESPacket,
-		StartCodeAudio: psDecoder.decodePESPacket,
+	decoder.handlers = map[int]func() error{
+		StartCodePS:    decoder.decodePsHeader,
+		StartCodeSYS:   decoder.decodeSystemHeader,
+		StartCodeMAP:   decoder.decodeProgramStreamMap,
+		StartCodeVideo: decoder.decodeVideoPes,
+		StartCodeAudio: decoder.decodeAudioPes,
 	}
-	psDecoder.psHeaderFields = []FieldInfo{
+	decoder.psHeaderFields = []FieldInfo{
 		{2, "fixed"},
 		{3, "system_clock_refrence_base1"},
 		{1, "marker_bit1"},
@@ -343,30 +444,51 @@ func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int) *PsDecode
 		{5, "reserved"},
 		{3, "pack_stuffing_length"},
 	}
-	return psDecoder
+	if dumpAudio {
+		err := decoder.openAudioFile()
+		if err != nil {
+			return nil
+		}
+	}
+	if dumpVideo {
+		err := decoder.openVideoFile()
+		if err != nil {
+			return nil
+		}
+	}
+	return decoder
+}
+
+func (dec *PsDecoder) showInfo() {
+	fmt.Println("")
+	log.Printf("total frame count: %d\n", dec.totalVideoFrameCnt)
+	log.Printf("err frame cont: %d\n", dec.errVideoFrameCnt)
+	log.Printf("I frame count: %d\n", dec.iFrameCnt)
+	log.Printf("err I frame count: %d\n", dec.errIFrameCnt)
+	log.Printf("program stream map count: %d", dec.psmCnt)
+	log.Printf("P frame count: %d\n", dec.pFrameCnt)
 }
 
 func main() {
 	log.SetFlags(log.Lshortfile)
-	psFile := os.Args[1]
-	psBuf, err := ioutil.ReadFile(psFile)
+	psFile := flag.String("file", "", "input file")
+	dumpAudio := flag.Bool("dump-audio", false, "dump audio")
+	dumpVideo := flag.Bool("dump-video", false, "dump video")
+	if *psFile == "" {
+		log.Prntln("must input file")
+		return
+	}
+	psBuf, err := ioutil.ReadFile(*psFile)
 	if err != nil {
-		log.Printf("open file: %s error", psFile)
+		log.Printf("open file: %s error", *psFile)
 		return
 	}
 	log.Printf("file size: %d", len(psBuf))
 	br := bitreader.NewReader(bytes.NewReader(psBuf))
-	psDecoder := NewPsDecoder(br, &psBuf, len(psBuf))
-	psDecoder.openH264File()
-	if err := psDecoder.decodePsPkts(); err != nil {
+	decoder := NewPsDecoder(br, &psBuf, len(psBuf), *dumpAudio, *dumpVideo)
+	if err := decoder.decodePsPkts(); err != nil {
 		log.Println(err)
 		return
 	}
-	fmt.Println("")
-	log.Printf("total frame count: %d\n", psDecoder.totalVideoFrameCnt)
-	log.Printf("err frame cont: %d\n", psDecoder.errVideoFrameCnt)
-	log.Printf("I frame count: %d\n", psDecoder.iFrameCnt)
-	log.Printf("err I frame count: %d\n", psDecoder.errIFrameCnt)
-	log.Printf("program stream map count: %d", psDecoder.psmCnt)
-	log.Printf("P frame count: %d\n", psDecoder.pFrameCnt)
+	decoder.showInfo()
 }
