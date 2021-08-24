@@ -27,6 +27,7 @@ var (
 	ErrParsePakcet       = errors.New("parse ps packet error")
 	ErrNewBiteReader     = errors.New("new bit reader error")
 	ErrCheckH264         = errors.New("check h264 error")
+	ErrCheckInputFile    = errors.New("check input file error")
 )
 
 type FieldInfo struct {
@@ -244,7 +245,7 @@ func (dec *PsDecoder) GetNextPackPos() (int, bool) {
 	return 0, true
 }
 
-func (dec *PsDecoder) skipInvalidBytes(payloadLen int) error {
+func (dec *PsDecoder) skipInvalidBytes(payloadLen uint32) error {
 	dec.errAudioFrameCnt++
 	log.Println("check audio error")
 	br := dec.br
@@ -262,7 +263,7 @@ func (dec *PsDecoder) skipInvalidBytes(payloadLen int) error {
 			log.Println(err)
 			return err
 		}
-		dec.saveAudio(skipBuf, uint32(skipLen), true)
+		dec.saveAudioPkt(skipBuf, uint32(skipLen), true)
 		return ErrCheckH264
 	}
 	return nil
@@ -469,23 +470,39 @@ func (dec *PsDecoder) showInfo() {
 	log.Printf("P frame count: %d\n", dec.pFrameCnt)
 }
 
+type consoleParam struct {
+	psFile    string
+	dumpAudio bool
+	dumpVideo bool
+}
+
+func parseConsoleParam() (*consoleParam, error) {
+	param := &consoleParam{}
+	flag.StringVar(&param.psFile, "file", "", "input file")
+	flag.BoolVar(&param.dumpAudio, "dump-audio", false, "dump audio")
+	flag.BoolVar(&param.dumpVideo, "dump-video", false, "dump video")
+	flag.Parse()
+	if param.psFile == "" {
+		log.Println("must input file")
+		return nil, ErrCheckInputFile
+	}
+	return param, nil
+}
+
 func main() {
 	log.SetFlags(log.Lshortfile)
-	psFile := flag.String("file", "", "input file")
-	dumpAudio := flag.Bool("dump-audio", false, "dump audio")
-	dumpVideo := flag.Bool("dump-video", false, "dump video")
-	if *psFile == "" {
-		log.Prntln("must input file")
+	param, err := parseConsoleParam()
+	if err != nil {
 		return
 	}
-	psBuf, err := ioutil.ReadFile(*psFile)
+	psBuf, err := ioutil.ReadFile(param.psFile)
 	if err != nil {
-		log.Printf("open file: %s error", *psFile)
+		log.Printf("open file: %s error", param.psFile)
 		return
 	}
 	log.Printf("file size: %d", len(psBuf))
 	br := bitreader.NewReader(bytes.NewReader(psBuf))
-	decoder := NewPsDecoder(br, &psBuf, len(psBuf), *dumpAudio, *dumpVideo)
+	decoder := NewPsDecoder(br, &psBuf, len(psBuf), param.dumpAudio, param.dumpVideo)
 	if err := decoder.decodePsPkts(); err != nil {
 		log.Println(err)
 		return
