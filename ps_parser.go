@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -55,6 +56,7 @@ type PsDecoder struct {
 	pFrameCnt          int
 	h264File           *os.File
 	audioFile          *os.File
+	param              *consoleParam
 }
 
 func (dec *PsDecoder) decodePsPkts() error {
@@ -363,13 +365,13 @@ func (decoder *PsDecoder) decodePsHeader() error {
 	}
 	pack_stuffing_length := decoder.psHeader["pack_stuffing_length"]
 	decoder.br.Skip(uint(pack_stuffing_length * 8))
-	/*
+	if decoder.param.printPsHeader {
 		b, err := json.MarshalIndent(decoder.psHeader, "", "  ")
 		if err != nil {
 			log.Println("error:", err)
 		}
 		fmt.Print(string(b) + "\n")
-	*/
+	}
 	return nil
 }
 
@@ -413,7 +415,7 @@ func (dec *PsDecoder) openAudioFile() error {
 	return nil
 }
 
-func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int, dumpAudio, dumpVideo bool) *PsDecoder {
+func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int, param *consoleParam) *PsDecoder {
 	decoder := &PsDecoder{
 		br:             br,
 		psHeader:       make(map[string]uint32),
@@ -421,6 +423,7 @@ func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int, dumpAudio
 		psHeaderFields: make([]FieldInfo, 14),
 		fileSize:       fileSize,
 		psBuf:          psBuf,
+		param:          param,
 	}
 	decoder.handlers = map[int]func() error{
 		StartCodePS:    decoder.decodePsHeader,
@@ -445,13 +448,13 @@ func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int, dumpAudio
 		{5, "reserved"},
 		{3, "pack_stuffing_length"},
 	}
-	if dumpAudio {
+	if param.dumpAudio {
 		err := decoder.openAudioFile()
 		if err != nil {
 			return nil
 		}
 	}
-	if dumpVideo {
+	if param.dumpVideo {
 		err := decoder.openVideoFile()
 		if err != nil {
 			return nil
@@ -471,9 +474,10 @@ func (dec *PsDecoder) showInfo() {
 }
 
 type consoleParam struct {
-	psFile    string
-	dumpAudio bool
-	dumpVideo bool
+	psFile        string
+	dumpAudio     bool
+	dumpVideo     bool
+	printPsHeader bool
 }
 
 func parseConsoleParam() (*consoleParam, error) {
@@ -481,6 +485,7 @@ func parseConsoleParam() (*consoleParam, error) {
 	flag.StringVar(&param.psFile, "file", "", "input file")
 	flag.BoolVar(&param.dumpAudio, "dump-audio", false, "dump audio")
 	flag.BoolVar(&param.dumpVideo, "dump-video", false, "dump video")
+	flag.BoolVar(&param.printPsHeader, "print-ps-header", false, "print ps header")
 	flag.Parse()
 	if param.psFile == "" {
 		log.Println("must input file")
@@ -502,7 +507,7 @@ func main() {
 	}
 	log.Printf("file size: %d", len(psBuf))
 	br := bitreader.NewReader(bytes.NewReader(psBuf))
-	decoder := NewPsDecoder(br, &psBuf, len(psBuf), param.dumpAudio, param.dumpVideo)
+	decoder := NewPsDecoder(br, &psBuf, len(psBuf), param)
 	if err := decoder.decodePsPkts(); err != nil {
 		log.Println(err)
 		return
