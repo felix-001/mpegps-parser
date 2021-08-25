@@ -73,11 +73,13 @@ func (dec *PsDecoder) decodePsPkts() error {
 			return err
 		}
 		dec.pktCnt++
-		fmt.Println()
-		log.Printf("pkt count: %d pos: %d/%d", dec.pktCnt, dec.getPos(), dec.fileSize)
+		if dec.param.verbose {
+			fmt.Println()
+			log.Printf("pkt count: %d pos: %d/%d", dec.pktCnt, dec.getPos(), dec.fileSize)
+		}
 		handler, ok := dec.handlers[int(startCode)]
 		if !ok {
-			log.Printf("check startCode error: 0x%x\n", startCode)
+			log.Printf("check startCode error: 0x%x pos:%d, fileSize:%d\n", startCode, dec.getPos(), dec.fileSize)
 			return ErrParsePakcet
 		}
 		handler()
@@ -172,24 +174,26 @@ func (dec *PsDecoder) decodeProgramStreamMap() error {
 }
 
 func (dec *PsDecoder) decodeH264(data []byte, len uint32, err bool) error {
-	log.Printf("\t\th264 len : %d", len)
-	if data[4] == 0x67 {
-		log.Println("\t\tSPS")
-	}
-	if data[4] == 0x68 {
-		log.Println("\t\tPPS")
-	}
-	if data[4] == 0x65 {
-		log.Println("\t\tIDR")
-		if err {
-			dec.errIFrameCnt++
-		} else {
-			dec.iFrameCnt++
+	if dec.param.verbose {
+		log.Printf("\t\th264 len : %d", len)
+		if data[4] == 0x67 {
+			log.Println("\t\tSPS")
 		}
-	}
-	if data[4] == 0x61 {
-		log.Println("\t\tP Frame")
-		dec.pFrameCnt++
+		if data[4] == 0x68 {
+			log.Println("\t\tPPS")
+		}
+		if data[4] == 0x65 {
+			log.Println("\t\tIDR")
+			if err {
+				dec.errIFrameCnt++
+			} else {
+				dec.iFrameCnt++
+			}
+		}
+		if data[4] == 0x61 {
+			log.Println("\t\tP Frame")
+			dec.pFrameCnt++
+		}
 	}
 	if !err && dec.h264File != nil {
 		dec.writeH264FrameToFile(data)
@@ -198,7 +202,9 @@ func (dec *PsDecoder) decodeH264(data []byte, len uint32, err bool) error {
 }
 
 func (dec *PsDecoder) saveAudioPkt(data []byte, len uint32, err bool) error {
-	log.Printf("\t\taudio len : %d", len)
+	if dec.param.verbose {
+		log.Printf("\t\taudio len : %d", len)
+	}
 	if !err && dec.audioFile != nil {
 		dec.writeAudioFrameToFile(data)
 	}
@@ -229,12 +235,12 @@ func (dec *PsDecoder) checkH264(h264Len uint32) bool {
 
 // 移动到当前位置+payloadLen位置，判断startcode是否正确
 // 如果startcode不正确，说明payloadLen是错误的
-func (dec *PsDecoder) isPayloadLenValid(audioLen uint32) bool {
+func (dec *PsDecoder) isPayloadLenValid(payloadLen uint32, pesType int, pesStartPos int64) bool {
 	psBuf := *dec.psBuf
-	pos := dec.getPos() + int64(audioLen)
+	pos := dec.getPos() + int64(payloadLen)
 	packStartCode := binary.BigEndian.Uint32(psBuf[pos : pos+4])
 	if !dec.isStartCodeValid(packStartCode) {
-		log.Printf("check payload len error: 0x%x pos: %d", packStartCode, dec.getPos())
+		log.Printf("check payload len error, len: %d pes start pos: %d(0x%x), pesType:%d", payloadLen, pesStartPos, pesStartPos, pesType)
 		return false
 	}
 	return true
@@ -259,16 +265,13 @@ func (dec *PsDecoder) skipInvalidBytes(payloadLen uint32, pesType int) error {
 	} else {
 		dec.errAudioFrameCnt++
 	}
-	log.Println("check payloadLen error")
 	br := dec.br
 	pos, end := dec.GetNextPackPos()
 	if !end {
-		log.Printf("audio len err, expect: %d actual: %d",
-			payloadLen, int64(pos)-dec.getPos())
-		//log.Printf("% X\n", (*dec.psBuf)[pos:pos+32])
-		log.Printf("skip pos: %d", pos)
 		skipLen := pos - int(dec.getPos())
-		log.Printf("skip len: %d", skipLen)
+		log.Printf("pes payload len err, expect: %d actual: %d", payloadLen, skipLen)
+		//log.Printf("% X\n", (*dec.psBuf)[pos:pos+32])
+		log.Printf("skip len: %d, next pack pos:%d", skipLen, pos)
 		skipBuf := make([]byte, skipLen)
 		// 由于payloadLen是错误的，所以下一个startcode和当前位置之间的字节需要丢弃
 		if _, err := io.ReadAtLeast(br, skipBuf, int(skipLen)); err != nil {
@@ -286,7 +289,9 @@ func (dec *PsDecoder) skipInvalidBytes(payloadLen uint32, pesType int) error {
 }
 
 func (dec *PsDecoder) decodeAudioPes() error {
-	log.Println("=== Audio ===")
+	if dec.param.verbose {
+		log.Println("=== Audio ===")
+	}
 	dec.totalAudioFrameCnt++
 	dec.decodePES(AudioPES)
 	return nil
@@ -300,7 +305,6 @@ func (dec *PsDecoder) decodePESHeader() (uint32, error) {
 		log.Println(err)
 		return 0, err
 	}
-	log.Printf("\tPES_packet_length: %d", payloadLen)
 
 	/* flags: pts_dts_flags ... */
 	br.Skip(16) // 跳过各种flags,比如pts_dts_flags
@@ -312,7 +316,10 @@ func (dec *PsDecoder) decodePESHeader() (uint32, error) {
 		log.Println(err)
 		return 0, err
 	}
-	log.Printf("\tpes_header_data_length: %d", pesHeaderDataLen)
+	if dec.param.verbose {
+		log.Printf("\tPES_packet_length: %d", payloadLen)
+		log.Printf("\tpes_header_data_length: %d", pesHeaderDataLen)
+	}
 	payloadLen--
 
 	/* pes header data */
@@ -323,13 +330,16 @@ func (dec *PsDecoder) decodePESHeader() (uint32, error) {
 
 func (dec *PsDecoder) decodePES(pesType int) error {
 	br := dec.br
+	pesStartPos := dec.getPos() - 4 // 4为startcode的长度
+	if dec.param.dumpPesStartBytes {
+		log.Printf("% X\n", (*dec.psBuf)[pesStartPos:pesStartPos+16])
+	}
 	payloadLen, err := dec.decodePESHeader()
 	if err != nil {
 		return err
 	}
-	if !dec.isPayloadLenValid(payloadLen) {
-		log.Println("check payload length error, skip")
-		dec.skipInvalidBytes(payloadLen, pesType)
+	if !dec.isPayloadLenValid(payloadLen, pesType, pesStartPos) {
+		return dec.skipInvalidBytes(payloadLen, pesType)
 	}
 	payloadData := make([]byte, payloadLen)
 	if _, err := io.ReadAtLeast(br, payloadData, int(payloadLen)); err != nil {
@@ -345,14 +355,18 @@ func (dec *PsDecoder) decodePES(pesType int) error {
 }
 
 func (dec *PsDecoder) decodeVideoPes() error {
-	log.Println("=== video ===")
+	if dec.param.verbose {
+		log.Println("=== video ===")
+	}
 	dec.totalVideoFrameCnt++
 	dec.decodePES(VideoPES)
 	return nil
 }
 
 func (decoder *PsDecoder) decodePsHeader() error {
-	log.Println("=== pack header ===")
+	if decoder.param.verbose {
+		log.Println("=== pack header ===")
+	}
 	psHeaderFields := decoder.psHeaderFields
 	for _, field := range psHeaderFields {
 		val, err := decoder.br.Read32(field.len)
@@ -461,7 +475,7 @@ func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int, param *co
 }
 
 func (dec *PsDecoder) showInfo() {
-	fmt.Println("")
+	fmt.Println()
 	log.Printf("total frame count: %d\n", dec.totalVideoFrameCnt)
 	log.Printf("err frame cont: %d\n", dec.errVideoFrameCnt)
 	log.Printf("I frame count: %d\n", dec.iFrameCnt)
@@ -471,13 +485,14 @@ func (dec *PsDecoder) showInfo() {
 }
 
 type consoleParam struct {
-	psFile          string
-	outputAudioFile string
-	outputVideoFile string
-	dumpAudio       bool
-	dumpVideo       bool
-	printPsHeader   bool
-	verbose         bool
+	psFile            string
+	outputAudioFile   string
+	outputVideoFile   string
+	dumpAudio         bool
+	dumpVideo         bool
+	printPsHeader     bool
+	verbose           bool
+	dumpPesStartBytes bool
 }
 
 func parseConsoleParam() (*consoleParam, error) {
@@ -489,6 +504,7 @@ func parseConsoleParam() (*consoleParam, error) {
 	flag.BoolVar(&param.dumpVideo, "dump-video", false, "dump video")
 	flag.BoolVar(&param.printPsHeader, "print-ps-header", false, "print ps header")
 	flag.BoolVar(&param.verbose, "verbose", false, "show packet detail")
+	flag.BoolVar(&param.dumpPesStartBytes, "dump-pes-start-bytes", false, "dump pes start bytes")
 	flag.Parse()
 	if param.psFile == "" {
 		log.Println("must input file")
@@ -508,7 +524,7 @@ func main() {
 		log.Printf("open file: %s error", param.psFile)
 		return
 	}
-	log.Printf("file size: %d", len(psBuf))
+	log.Println(param.psFile, "file size:", len(psBuf))
 	br := bitreader.NewReader(bytes.NewReader(psBuf))
 	decoder := NewPsDecoder(br, &psBuf, len(psBuf), param)
 	if err := decoder.decodePsPkts(); err != nil {
