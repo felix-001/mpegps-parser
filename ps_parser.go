@@ -222,17 +222,6 @@ func (dec *PsDecoder) isStartCodeValid(startCode uint32) bool {
 	return false
 }
 
-func (dec *PsDecoder) checkH264(h264Len uint32) bool {
-	psBuf := *dec.psBuf
-	pos := dec.getPos() + int64(h264Len)
-	packStartCode := binary.BigEndian.Uint32(psBuf[pos : pos+4])
-	if !dec.isStartCodeValid(packStartCode) {
-		log.Printf("check start code error: 0x%x pos: %d", packStartCode, dec.getPos())
-		return false
-	}
-	return true
-}
-
 // 移动到当前位置+payloadLen位置，判断startcode是否正确
 // 如果startcode不正确，说明payloadLen是错误的
 func (dec *PsDecoder) isPayloadLenValid(payloadLen uint32, pesType int, pesStartPos int64) bool {
@@ -259,7 +248,7 @@ func (dec *PsDecoder) GetNextPackPos() (int, bool) {
 	return 0, true
 }
 
-func (dec *PsDecoder) skipInvalidBytes(payloadLen uint32, pesType int) error {
+func (dec *PsDecoder) skipInvalidBytes(payloadLen uint32, pesType int, pesStartPos int64) error {
 	if pesType == VideoPES {
 		dec.errVideoFrameCnt++
 	} else {
@@ -269,8 +258,8 @@ func (dec *PsDecoder) skipInvalidBytes(payloadLen uint32, pesType int) error {
 	pos, end := dec.GetNextPackPos()
 	if !end {
 		skipLen := pos - int(dec.getPos())
+		log.Printf("pes start dump: % X\n", (*dec.psBuf)[pesStartPos:pesStartPos+16])
 		log.Printf("pes payload len err, expect: %d actual: %d", payloadLen, skipLen)
-		//log.Printf("% X\n", (*dec.psBuf)[pos:pos+32])
 		log.Printf("skip len: %d, next pack pos:%d", skipLen, pos)
 		skipBuf := make([]byte, skipLen)
 		// 由于payloadLen是错误的，所以下一个startcode和当前位置之间的字节需要丢弃
@@ -339,7 +328,7 @@ func (dec *PsDecoder) decodePES(pesType int) error {
 		return err
 	}
 	if !dec.isPayloadLenValid(payloadLen, pesType, pesStartPos) {
-		return dec.skipInvalidBytes(payloadLen, pesType)
+		return dec.skipInvalidBytes(payloadLen, pesType, pesStartPos)
 	}
 	payloadData := make([]byte, payloadLen)
 	if _, err := io.ReadAtLeast(br, payloadData, int(payloadLen)); err != nil {
