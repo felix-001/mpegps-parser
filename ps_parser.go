@@ -480,12 +480,15 @@ func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int, param *co
 
 func (dec *PsDecoder) showInfo() {
 	fmt.Println()
-	log.Printf("total frame count: %d\n", dec.totalVideoFrameCnt)
+	log.Printf("total video frame count: %d\n", dec.totalVideoFrameCnt)
 	log.Printf("err frame cont: %d\n", dec.errVideoFrameCnt)
 	log.Printf("I frame count: %d\n", dec.iFrameCnt)
 	log.Printf("err I frame count: %d\n", dec.errIFrameCnt)
 	log.Printf("program stream map count: %d", dec.psmCnt)
 	log.Printf("P frame count: %d\n", dec.pFrameCnt)
+	log.Println("total audio frame count:", dec.totalAudioFrameCnt)
+	log.Printf("video stream type: 0x%x\n", dec.videoStreamType)
+	log.Printf("audio stream type: 0x%x\n", dec.audioStreamType)
 }
 
 type consoleParam struct {
