@@ -88,10 +88,12 @@ func (dec *PsDecoder) decodePsPkts() error {
 }
 
 func (dec *PsDecoder) decodeSystemHeader() error {
-	log.Println("=== ps system header === ")
 	br := dec.br
 	syslens, err := br.Read32(16)
-	log.Printf("\tsystem_header_length:%d", syslens)
+	if dec.param.printSysHeader {
+		log.Println("=== ps system header === ")
+		log.Printf("\tsystem_header_length:%d", syslens)
+	}
 	if err != nil {
 		return err
 	}
@@ -109,7 +111,9 @@ func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
 	br := decoder.br
 	for programStreamMapLen > 0 {
 		streamType, err := br.Read32(8)
-		log.Printf("\t\tstream type: 0x%x", streamType)
+		if decoder.param.printPsm {
+			log.Printf("\t\tstream type: 0x%x", streamType)
+		}
 		if err != nil {
 			return err
 		}
@@ -123,12 +127,16 @@ func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
 		if elementaryStreamID >= 0xc0 && elementaryStreamID <= 0xdf {
 			decoder.audioStreamType = streamType
 		}
-		log.Printf("\t\tstream id: 0x%x", elementaryStreamID)
+		if decoder.param.printPsm {
+			log.Printf("\t\tstream id: 0x%x", elementaryStreamID)
+		}
 		elementaryStreamInfoLength, err := br.Read32(16)
 		if err != nil {
 			return err
 		}
-		log.Printf("\t\telementary_stream_info_length: %d", elementaryStreamInfoLength)
+		if decoder.param.printPsm {
+			log.Printf("\t\telementary_stream_info_length: %d", elementaryStreamInfoLength)
+		}
 		br.Skip(uint(elementaryStreamInfoLength * 8))
 		programStreamMapLen -= (4 + elementaryStreamInfoLength)
 	}
@@ -136,14 +144,16 @@ func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
 }
 
 func (dec *PsDecoder) decodeProgramStreamMap() error {
-	log.Println("=== program stream map ===")
 	br := dec.br
 	dec.psmCnt++
 	psmLen, err := br.Read32(16)
 	if err != nil {
 		return err
 	}
-	log.Printf("\tprogram_stream_map_length: %d pos: %d", psmLen, dec.getPos())
+	if dec.param.printPsm {
+		log.Println("=== program stream map ===")
+		log.Printf("\tprogram_stream_map_length: %d pos: %d", psmLen, dec.getPos())
+	}
 	//drop psm version info
 	br.Skip(16)
 	psmLen -= 2
@@ -158,7 +168,9 @@ func (dec *PsDecoder) decodeProgramStreamMap() error {
 		return err
 	}
 	psmLen -= (2 + programStreamMapLen)
-	log.Printf("\tprogram_stream_info_length: %d", programStreamMapLen)
+	if dec.param.printPsm {
+		log.Printf("\tprogram_stream_info_length: %d", programStreamMapLen)
+	}
 
 	if err := dec.decodePsmNLoop(programStreamMapLen); err != nil {
 		return err
@@ -166,7 +178,9 @@ func (dec *PsDecoder) decodeProgramStreamMap() error {
 
 	// crc 32
 	if psmLen != 4 {
-		log.Printf("psmLen: 0x%x", psmLen)
+		if dec.param.printPsm {
+			log.Printf("psmLen: 0x%x", psmLen)
+		}
 		return ErrFormatPack
 	}
 	br.Skip(32)
@@ -227,6 +241,10 @@ func (dec *PsDecoder) isStartCodeValid(startCode uint32) bool {
 func (dec *PsDecoder) isPayloadLenValid(payloadLen uint32, pesType int, pesStartPos int64) bool {
 	psBuf := *dec.psBuf
 	pos := dec.getPos() + int64(payloadLen)
+	if pos >= int64(dec.fileSize) {
+		log.Println("reach file end, quit")
+		return false
+	}
 	packStartCode := binary.BigEndian.Uint32(psBuf[pos : pos+4])
 	if !dec.isStartCodeValid(packStartCode) {
 		log.Printf("check payload len error, len: %d pes start pos: %d(0x%x), pesType:%d", payloadLen, pesStartPos, pesStartPos, pesType)
@@ -235,17 +253,17 @@ func (dec *PsDecoder) isPayloadLenValid(payloadLen uint32, pesType int, pesStart
 	return true
 }
 
-func (dec *PsDecoder) GetNextPackPos() (int, bool) {
+func (dec *PsDecoder) GetNextPackPos() int {
 	pos := int(dec.getPos())
 	for pos < dec.fileSize-4 {
 		b := (*dec.psBuf)[pos : pos+4]
 		packStartCode := binary.BigEndian.Uint32(b)
 		if dec.isStartCodeValid((packStartCode)) {
-			return pos, false
+			return pos
 		}
 		pos++
 	}
-	return 0, true
+	return dec.fileSize
 }
 
 func (dec *PsDecoder) skipInvalidBytes(payloadLen uint32, pesType int, pesStartPos int64) error {
@@ -255,24 +273,21 @@ func (dec *PsDecoder) skipInvalidBytes(payloadLen uint32, pesType int, pesStartP
 		dec.errAudioFrameCnt++
 	}
 	br := dec.br
-	pos, end := dec.GetNextPackPos()
-	if !end {
-		skipLen := pos - int(dec.getPos())
-		log.Printf("pes start dump: % X\n", (*dec.psBuf)[pesStartPos:pesStartPos+16])
-		log.Printf("pes payload len err, expect: %d actual: %d", payloadLen, skipLen)
-		log.Printf("skip len: %d, next pack pos:%d", skipLen, pos)
-		skipBuf := make([]byte, skipLen)
-		// 由于payloadLen是错误的，所以下一个startcode和当前位置之间的字节需要丢弃
-		if _, err := io.ReadAtLeast(br, skipBuf, int(skipLen)); err != nil {
-			log.Println(err)
-			return err
-		}
-		if pesType == AudioPES {
-			dec.saveAudioPkt(skipBuf, uint32(skipLen), true)
-		} else {
-			dec.decodeH264(skipBuf, uint32(skipLen), true)
-		}
-		return ErrCheckPayloadLen
+	pos := dec.GetNextPackPos()
+	skipLen := pos - int(dec.getPos())
+	log.Printf("pes start dump: % X\n", (*dec.psBuf)[pesStartPos:pesStartPos+16])
+	log.Printf("pes payload len err, expect: %d actual: %d", payloadLen, skipLen)
+	log.Printf("skip len: %d, next pack pos:%d", skipLen, pos)
+	skipBuf := make([]byte, skipLen)
+	// 由于payloadLen是错误的，所以下一个startcode和当前位置之间的字节需要丢弃
+	if _, err := io.ReadAtLeast(br, skipBuf, int(skipLen)); err != nil {
+		log.Println(err)
+		return err
+	}
+	if pesType == AudioPES {
+		dec.saveAudioPkt(skipBuf, uint32(skipLen), true)
+	} else {
+		dec.decodeH264(skipBuf, uint32(skipLen), true)
 	}
 	return nil
 }
@@ -480,6 +495,8 @@ type consoleParam struct {
 	dumpAudio         bool
 	dumpVideo         bool
 	printPsHeader     bool
+	printSysHeader    bool
+	printPsm          bool
 	verbose           bool
 	dumpPesStartBytes bool
 }
@@ -492,6 +509,8 @@ func parseConsoleParam() (*consoleParam, error) {
 	flag.BoolVar(&param.dumpAudio, "dump-audio", false, "dump audio")
 	flag.BoolVar(&param.dumpVideo, "dump-video", false, "dump video")
 	flag.BoolVar(&param.printPsHeader, "print-ps-header", false, "print ps header")
+	flag.BoolVar(&param.printSysHeader, "print-sys-header", false, "print system header")
+	flag.BoolVar(&param.printPsm, "print-psm", false, "print porgram stream map")
 	flag.BoolVar(&param.verbose, "verbose", false, "show packet detail")
 	flag.BoolVar(&param.dumpPesStartBytes, "dump-pes-start-bytes", false, "dump pes start bytes")
 	flag.Parse()
