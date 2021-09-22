@@ -1,1 +1,9 @@
 output.audio
+bin
+darwin
+deploy
+*.cpp
+*.c
+*.h
+pkt
+.vscode
