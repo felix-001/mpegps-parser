@@ -10,6 +10,7 @@ import (
 type TableItem struct {
 	Offset  int64
 	PktType string
+	Status  string
 }
 
 type CustomTableModel struct {
@@ -20,8 +21,6 @@ type CustomTableModel struct {
 }
 
 func (m *CustomTableModel) init() {
-	m.modelData = []TableItem{{10, "doe"}, {12, "bob"}}
-
 	m.ConnectHeaderData(m.headerData)
 	m.ConnectRowCount(m.rowCount)
 	m.ConnectColumnCount(m.columnCount)
@@ -38,6 +37,8 @@ func (m *CustomTableModel) headerData(section int, orientation core.Qt__Orientat
 		return core.NewQVariant1("offset")
 	case 1:
 		return core.NewQVariant1("包类型")
+	case 2:
+		return core.NewQVariant1("状态")
 	}
 	return core.NewQVariant()
 }
@@ -47,7 +48,7 @@ func (m *CustomTableModel) rowCount(*core.QModelIndex) int {
 }
 
 func (m *CustomTableModel) columnCount(*core.QModelIndex) int {
-	return 2
+	return 3
 }
 
 func (m *CustomTableModel) data(index *core.QModelIndex, role int) *core.QVariant {
@@ -61,6 +62,8 @@ func (m *CustomTableModel) data(index *core.QModelIndex, role int) *core.QVarian
 		return core.NewQVariant1(item.Offset)
 	case "包类型":
 		return core.NewQVariant1(item.PktType)
+	case "状态":
+		return core.NewQVariant1(item.Status)
 	}
 	return core.NewQVariant()
 }
