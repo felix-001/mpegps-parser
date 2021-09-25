@@ -92,7 +92,6 @@ func callbackCustomTableModel113121_Constructor(ptr unsafe.Pointer) {
 	this := NewCustomTableModelFromPointer(ptr)
 	qt.Register(ptr, this)
 	this.ConnectAdd(this.add)
-	this.ConnectEdit(this.edit)
 	this.init()
 }
 
@@ -140,56 +139,6 @@ func (ptr *CustomTableModel) Add(item TableItem) {
 		itemTID := time.Now().UnixNano() + int64(uintptr(unsafe.Pointer(&item)))
 		qt.RegisterTemp(unsafe.Pointer(uintptr(itemTID)), unsafe.Pointer(&item))
 		C.CustomTableModel113121_Add(ptr.Pointer(), C.uintptr_t(itemTID))
-	}
-}
-
-//export callbackCustomTableModel113121_Edit
-func callbackCustomTableModel113121_Edit(ptr unsafe.Pointer, firstName C.struct_Moc_PackedString, lastName C.struct_Moc_PackedString) {
-	if signal := qt.GetSignal(ptr, "edit"); signal != nil {
-		(*(*func(string, string))(signal))(cGoUnpackString(firstName), cGoUnpackString(lastName))
-	}
-
-}
-
-func (ptr *CustomTableModel) ConnectEdit(f func(firstName string, lastName string)) {
-	if ptr.Pointer() != nil {
-
-		if !qt.ExistsSignal(ptr.Pointer(), "edit") {
-			C.CustomTableModel113121_ConnectEdit(ptr.Pointer(), C.longlong(qt.ConnectionType(ptr.Pointer(), "edit")))
-		}
-
-		if signal := qt.LendSignal(ptr.Pointer(), "edit"); signal != nil {
-			f := func(firstName string, lastName string) {
-				(*(*func(string, string))(signal))(firstName, lastName)
-				f(firstName, lastName)
-			}
-			qt.ConnectSignal(ptr.Pointer(), "edit", unsafe.Pointer(&f))
-		} else {
-			qt.ConnectSignal(ptr.Pointer(), "edit", unsafe.Pointer(&f))
-		}
-	}
-}
-
-func (ptr *CustomTableModel) DisconnectEdit() {
-	if ptr.Pointer() != nil {
-		C.CustomTableModel113121_DisconnectEdit(ptr.Pointer())
-		qt.DisconnectSignal(ptr.Pointer(), "edit")
-	}
-}
-
-func (ptr *CustomTableModel) Edit(firstName string, lastName string) {
-	if ptr.Pointer() != nil {
-		var firstNameC *C.char
-		if firstName != "" {
-			firstNameC = C.CString(firstName)
-			defer C.free(unsafe.Pointer(firstNameC))
-		}
-		var lastNameC *C.char
-		if lastName != "" {
-			lastNameC = C.CString(lastName)
-			defer C.free(unsafe.Pointer(lastNameC))
-		}
-		C.CustomTableModel113121_Edit(ptr.Pointer(), C.struct_Moc_PackedString{data: firstNameC, len: C.longlong(len(firstName))}, C.struct_Moc_PackedString{data: lastNameC, len: C.longlong(len(lastName))})
 	}
 }
 

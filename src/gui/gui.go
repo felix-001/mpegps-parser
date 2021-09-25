@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"log"
 	"os"
 
 	"github.com/therecipe/qt/core"
@@ -8,20 +9,19 @@ import (
 )
 
 type TableItem struct {
-	firstName string
-	lastName  string
+	offset  int64
+	pktType string
 }
 
 type CustomTableModel struct {
 	core.QAbstractTableModel
-	_         func()                                  `constructor:"init"`
-	_         func(item TableItem)                    `signal:"add,auto"`
-	_         func(firstName string, lastName string) `signal:"edit,auto"`
+	_         func()               `constructor:"init"`
+	_         func(item TableItem) `signal:"add,auto"`
 	modelData []TableItem
 }
 
 func (m *CustomTableModel) init() {
-	m.modelData = []TableItem{{"john", "doe"}, {"john", "bob"}}
+	m.modelData = []TableItem{{10, "doe"}, {12, "bob"}}
 
 	m.ConnectHeaderData(m.headerData)
 	m.ConnectRowCount(m.rowCount)
@@ -36,9 +36,9 @@ func (m *CustomTableModel) headerData(section int, orientation core.Qt__Orientat
 
 	switch section {
 	case 0:
-		return core.NewQVariant1("FirstName")
+		return core.NewQVariant1("offset")
 	case 1:
-		return core.NewQVariant1("LastName")
+		return core.NewQVariant1("包类型")
 	}
 	return core.NewQVariant()
 }
@@ -58,34 +58,28 @@ func (m *CustomTableModel) data(index *core.QModelIndex, role int) *core.QVarian
 
 	item := m.modelData[index.Row()]
 	switch m.HeaderData(index.Column(), core.Qt__Horizontal, role).ToString() {
-	case "FirstName":
-		return core.NewQVariant1(item.firstName)
-	case "LastName":
-		return core.NewQVariant1(item.lastName)
+	case "offset":
+		return core.NewQVariant1(item.offset)
+	case "包类型":
+		return core.NewQVariant1(item.pktType)
 	}
 	return core.NewQVariant()
 }
 
 func (m *CustomTableModel) add(item TableItem) {
+	log.Println("add", item)
 	m.BeginInsertRows(core.NewQModelIndex(), len(m.modelData), len(m.modelData))
 	m.modelData = append(m.modelData, item)
 	m.EndInsertRows()
 }
 
-func (m *CustomTableModel) edit(firstName string, lastName string) {
-	if len(m.modelData) == 0 {
-		return
-	}
-	m.modelData[len(m.modelData)-1] = TableItem{firstName, lastName}
-	m.DataChanged(m.Index(len(m.modelData)-1, 0, core.NewQModelIndex()), m.Index(len(m.modelData)-1, 1, core.NewQModelIndex()), []int{int(core.Qt__DisplayRole)})
-}
-
 type ui struct {
 	model *CustomTableModel
+	ch    chan string
 }
 
-func New() *ui {
-	return &ui{}
+func New(ch chan string) *ui {
+	return &ui{ch: ch}
 }
 
 func (ui *ui) Disp() {
@@ -102,6 +96,7 @@ func (ui *ui) Disp() {
 
 	tableview := widgets.NewQTableView(nil)
 	ui.model = NewCustomTableModel(nil)
+	go ui.ShowData(ui.ch)
 	tableview.SetModel(ui.model)
 	widget.Layout().AddWidget(tableview)
 
@@ -110,7 +105,10 @@ func (ui *ui) Disp() {
 }
 
 func (ui *ui) ShowData(ch chan string) {
-	if data, ok := <-ch; ok {
-		ui.model.Add(TableItem{"john", data})
+	for {
+		if data, ok := <-ch; ok {
+			log.Println(data)
+			ui.model.Add(TableItem{22, data})
+		}
 	}
 }

@@ -74,6 +74,7 @@ func (dec *PsDecoder) decodePsPkts() error {
 			return err
 		}
 		dec.pktCnt++
+		log.Println(dec.pktCnt)
 		dec.ch <- fmt.Sprintf("%d", dec.pktCnt)
 		if dec.param.verbose {
 			fmt.Println()
@@ -432,7 +433,7 @@ func (dec *PsDecoder) openAudioFile() error {
 	return nil
 }
 
-func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int, param *consoleParam) *PsDecoder {
+func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int, param *consoleParam, ch chan string) *PsDecoder {
 	decoder := &PsDecoder{
 		br:             br,
 		psHeader:       make(map[string]uint32),
@@ -441,6 +442,7 @@ func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int, param *co
 		fileSize:       fileSize,
 		psBuf:          psBuf,
 		param:          param,
+		ch:             ch,
 	}
 	decoder.handlers = map[int]func() error{
 		StartCodePS:    decoder.decodePsHeader,
@@ -527,7 +529,6 @@ func parseConsoleParam() (*consoleParam, error) {
 }
 
 func Process(ch chan string) {
-	log.SetFlags(log.Lshortfile)
 	param, err := parseConsoleParam()
 	if err != nil {
 		return
@@ -539,7 +540,7 @@ func Process(ch chan string) {
 	}
 	log.Println(param.psFile, "file size:", len(psBuf))
 	br := bitreader.NewReader(bytes.NewReader(psBuf))
-	decoder := NewPsDecoder(br, &psBuf, len(psBuf), param)
+	decoder := NewPsDecoder(br, &psBuf, len(psBuf), param, ch)
 	if err := decoder.decodePsPkts(); err != nil {
 		log.Println(err)
 		return
