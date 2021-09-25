@@ -366,7 +366,8 @@ func (dec *PsDecoder) decodePES(pesType int) error {
 		return err
 	}
 	if !dec.isPayloadLenValid(payloadLen, pesType, pesStartPos) {
-		return dec.skipInvalidBytes(payloadLen, pesType, pesStartPos)
+		dec.skipInvalidBytes(payloadLen, pesType, pesStartPos)
+		return ErrCheckPayloadLen
 	}
 	payloadData := make([]byte, payloadLen)
 	if _, err := io.ReadAtLeast(br, payloadData, int(payloadLen)); err != nil {

@@ -88,7 +88,7 @@ func (ui *ui) Disp() {
 	app := widgets.NewQApplication(len(os.Args), os.Args)
 
 	window := widgets.NewQMainWindow(nil, 0)
-	window.SetMinimumSize2(250, 200)
+	window.SetMinimumSize2(500, 700)
 	window.SetWindowTitle("tableview Example")
 
 	widget := widgets.NewQWidget(nil, 0)
