@@ -1,7 +1,6 @@
 package gui
 
 import (
-	"log"
 	"os"
 
 	"github.com/therecipe/qt/core"
@@ -9,8 +8,8 @@ import (
 )
 
 type TableItem struct {
-	offset  int64
-	pktType string
+	Offset  int64
+	PktType string
 }
 
 type CustomTableModel struct {
@@ -59,15 +58,14 @@ func (m *CustomTableModel) data(index *core.QModelIndex, role int) *core.QVarian
 	item := m.modelData[index.Row()]
 	switch m.HeaderData(index.Column(), core.Qt__Horizontal, role).ToString() {
 	case "offset":
-		return core.NewQVariant1(item.offset)
+		return core.NewQVariant1(item.Offset)
 	case "包类型":
-		return core.NewQVariant1(item.pktType)
+		return core.NewQVariant1(item.PktType)
 	}
 	return core.NewQVariant()
 }
 
 func (m *CustomTableModel) add(item TableItem) {
-	log.Println("add", item)
 	m.BeginInsertRows(core.NewQModelIndex(), len(m.modelData), len(m.modelData))
 	m.modelData = append(m.modelData, item)
 	m.EndInsertRows()
@@ -75,10 +73,10 @@ func (m *CustomTableModel) add(item TableItem) {
 
 type ui struct {
 	model *CustomTableModel
-	ch    chan string
+	ch    chan *TableItem
 }
 
-func New(ch chan string) *ui {
+func New(ch chan *TableItem) *ui {
 	return &ui{ch: ch}
 }
 
@@ -104,11 +102,10 @@ func (ui *ui) Disp() {
 	app.Exec()
 }
 
-func (ui *ui) ShowData(ch chan string) {
+func (ui *ui) ShowData(ch chan *TableItem) {
 	for {
 		if data, ok := <-ch; ok {
-			log.Println(data)
-			ui.model.Add(TableItem{22, data})
+			ui.model.Add(*data)
 		}
 	}
 }
