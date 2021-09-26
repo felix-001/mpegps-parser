@@ -103,9 +103,12 @@ func (ui *ui) Disp() {
 	model := NewCustomTreeModel(nil)
 	treeview.SetModel(model)
 
+	textedit := widgets.NewQTextEdit(nil)
+
 	layout := widgets.NewQGridLayout2()
 	layout.AddWidget(tableview)
-	layout.AddWidget(treeview)
+	layout.AddWidget2(treeview, 0, 1, 0)
+	layout.AddWidget2(textedit, 1, 0, 0)
 
 	centralWidget := widgets.NewQWidget(nil, 0)
 	centralWidget.SetLayout(layout)
