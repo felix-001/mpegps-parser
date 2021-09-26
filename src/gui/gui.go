@@ -99,7 +99,7 @@ func (ui *ui) Disp() {
 	tableview := widgets.NewQTableView(nil)
 	ui.model = NewCustomTableModel(nil)
 	tableview.SetModel(ui.model)
-	widget.Layout().AddWidget(tableview)
+	layout.AddWidget(tableview)
 
 	go ui.ShowData(ui.ch)
 	window.Show()
