@@ -88,7 +88,7 @@ func (ui *ui) Disp() {
 	app := widgets.NewQApplication(len(os.Args), os.Args)
 
 	window := widgets.NewQMainWindow(nil, 0)
-	window.SetMinimumSize2(500, 700)
+	window.SetMinimumSize2(700, 700)
 	window.SetWindowTitle("mpegps解析")
 
 	widget := widgets.NewQWidget(nil, 0)
@@ -107,7 +107,7 @@ func (ui *ui) Disp() {
 
 	layout := widgets.NewQGridLayout2()
 	layout.AddWidget(tableview)
-	layout.AddWidget2(treeview, 0, 1, 0)
+	layout.AddWidget3(treeview, 0, 1, 2, 1, 0)
 	layout.AddWidget2(textedit, 1, 0, 0)
 
 	centralWidget := widgets.NewQWidget(nil, 0)
