@@ -89,7 +89,7 @@ func (ui *ui) Disp() {
 
 	window := widgets.NewQMainWindow(nil, 0)
 	window.SetMinimumSize2(500, 700)
-	window.SetWindowTitle("tableview Example")
+	window.SetWindowTitle("mpegps解析")
 
 	widget := widgets.NewQWidget(nil, 0)
 	widget.SetLayout(widgets.NewQVBoxLayout())
