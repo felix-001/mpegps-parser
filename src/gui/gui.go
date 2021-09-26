@@ -91,12 +91,17 @@ func (ui *ui) Disp() {
 	window.SetMinimumSize2(500, 700)
 	window.SetWindowTitle("mpegps解析器")
 
-	layout := widgets.NewQGridLayout2()
-
 	tableview := widgets.NewQTableView(nil)
 	ui.model = NewCustomTableModel(nil)
 	tableview.SetModel(ui.model)
+
+	treeview := widgets.NewQTreeView(nil)
+	model := NewCustomTreeModel(nil)
+	treeview.SetModel(model)
+
+	layout := widgets.NewQGridLayout2()
 	layout.AddWidget(tableview)
+	layout.AddWidget(treeview)
 
 	centralWidget := widgets.NewQWidget(nil, 0)
 	centralWidget.SetLayout(layout)
