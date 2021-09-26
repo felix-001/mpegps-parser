@@ -97,10 +97,20 @@ func (ui *ui) Disp() {
 
 	tableview := widgets.NewQTableView(nil)
 	ui.model = NewCustomTableModel(nil)
-	go ui.ShowData(ui.ch)
 	tableview.SetModel(ui.model)
-	widget.Layout().AddWidget(tableview)
 
+	treeview := widgets.NewQTreeView(nil)
+	model := NewCustomTreeModel(nil)
+	treeview.SetModel(model)
+
+	layout := widgets.NewQGridLayout2()
+	layout.AddWidget(tableview)
+	layout.AddWidget(treeview)
+
+	centralWidget := widgets.NewQWidget(nil, 0)
+	centralWidget.SetLayout(layout)
+	window.SetCentralWidget(centralWidget)
+	go ui.ShowData(ui.ch)
 	window.Show()
 	app.Exec()
 }

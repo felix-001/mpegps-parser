@@ -7,3 +7,6 @@ deploy
 *.h
 pkt
 .vscode
+pkg
+core
+widgets
