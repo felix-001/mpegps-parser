@@ -8,11 +8,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"gui"
 	"io"
 	"io/ioutil"
 	"log"
 	"os"
+	"ui"
 )
 
 const (
@@ -48,7 +48,7 @@ type PsDecoder struct {
 	audioStreamType    uint32
 	br                 bitreader.BitReader
 	psHeader           map[string]uint32
-	handlers           map[int]func() (*gui.TableItem, error)
+	handlers           map[int]func() (*ui.TableItem, error)
 	psHeaderFields     []FieldInfo
 	pktCnt             int
 	fileSize           int
@@ -64,7 +64,7 @@ type PsDecoder struct {
 	h264File           *os.File
 	audioFile          *os.File
 	param              *consoleParam
-	ch                 chan *gui.TableItem
+	ch                 chan *ui.TableItem
 }
 
 func (dec *PsDecoder) decodePsPkts() error {
@@ -92,14 +92,14 @@ func (dec *PsDecoder) decodePsPkts() error {
 	return nil
 }
 
-func (dec *PsDecoder) decodeSystemHeader() (*gui.TableItem, error) {
+func (dec *PsDecoder) decodeSystemHeader() (*ui.TableItem, error) {
 	br := dec.br
 	syslens, err := br.Read32(16)
 	if dec.param.printSysHeader {
 		log.Println("=== ps system header === ")
 		log.Printf("\tsystem_header_length:%d", syslens)
 	}
-	item := &gui.TableItem{
+	item := &ui.TableItem{
 		PktType: "system header",
 		Status:  "OK",
 	}
@@ -153,10 +153,10 @@ func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
 	return nil
 }
 
-func (dec *PsDecoder) decodeProgramStreamMap() (*gui.TableItem, error) {
+func (dec *PsDecoder) decodeProgramStreamMap() (*ui.TableItem, error) {
 	br := dec.br
 	dec.psmCnt++
-	item := &gui.TableItem{
+	item := &ui.TableItem{
 		PktType: "program stream map",
 		Status:  "Error",
 	}
@@ -307,12 +307,12 @@ func (dec *PsDecoder) skipInvalidBytes(payloadLen uint32, pesType int, pesStartP
 	return nil
 }
 
-func (dec *PsDecoder) decodeAudioPes() (*gui.TableItem, error) {
+func (dec *PsDecoder) decodeAudioPes() (*ui.TableItem, error) {
 	if dec.param.verbose {
 		log.Println("=== Audio ===")
 	}
 	dec.totalAudioFrameCnt++
-	item := &gui.TableItem{
+	item := &ui.TableItem{
 		PktType: "audio pes",
 		Status:  "Error",
 	}
@@ -382,12 +382,12 @@ func (dec *PsDecoder) decodePES(pesType int) error {
 	return nil
 }
 
-func (dec *PsDecoder) decodeVideoPes() (*gui.TableItem, error) {
+func (dec *PsDecoder) decodeVideoPes() (*ui.TableItem, error) {
 	if dec.param.verbose {
 		log.Println("=== video ===")
 	}
 	dec.totalVideoFrameCnt++
-	item := &gui.TableItem{
+	item := &ui.TableItem{
 		PktType: "video pes",
 		Status:  "Error",
 	}
@@ -399,11 +399,11 @@ func (dec *PsDecoder) decodeVideoPes() (*gui.TableItem, error) {
 	return item, nil
 }
 
-func (decoder *PsDecoder) decodePsHeader() (*gui.TableItem, error) {
+func (decoder *PsDecoder) decodePsHeader() (*ui.TableItem, error) {
 	if decoder.param.verbose {
 		log.Println("=== pack header ===")
 	}
-	item := &gui.TableItem{
+	item := &ui.TableItem{
 		PktType: "pack header",
 		Status:  "OK",
 	}
@@ -467,18 +467,18 @@ func (dec *PsDecoder) openAudioFile() error {
 	return nil
 }
 
-func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int, param *consoleParam, ch chan *gui.TableItem) *PsDecoder {
+func NewPsDecoder(br bitreader.BitReader, psBuf *[]byte, fileSize int, param *consoleParam, ch chan *ui.TableItem) *PsDecoder {
 	decoder := &PsDecoder{
 		br:             br,
 		psHeader:       make(map[string]uint32),
-		handlers:       make(map[int]func() (*gui.TableItem, error)),
+		handlers:       make(map[int]func() (*ui.TableItem, error)),
 		psHeaderFields: make([]FieldInfo, 14),
 		fileSize:       fileSize,
 		psBuf:          psBuf,
 		param:          param,
 		ch:             ch,
 	}
-	decoder.handlers = map[int]func() (*gui.TableItem, error){
+	decoder.handlers = map[int]func() (*ui.TableItem, error){
 		StartCodePS:    decoder.decodePsHeader,
 		StartCodeSYS:   decoder.decodeSystemHeader,
 		StartCodeMAP:   decoder.decodeProgramStreamMap,
@@ -562,7 +562,7 @@ func parseConsoleParam() (*consoleParam, error) {
 	return param, nil
 }
 
-func Process(ch chan *gui.TableItem) {
+func Process(ch chan *ui.TableItem) {
 	param, err := parseConsoleParam()
 	if err != nil {
 		return

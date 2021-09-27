@@ -1,9 +1,10 @@
-package gui
+package ui
 
 import (
 	"os"
 
 	"github.com/therecipe/qt/core"
+	"github.com/therecipe/qt/gui"
 	"github.com/therecipe/qt/widgets"
 )
 
@@ -88,7 +89,7 @@ func (ui *ui) Disp() {
 	app := widgets.NewQApplication(len(os.Args), os.Args)
 
 	window := widgets.NewQMainWindow(nil, 0)
-	window.SetMinimumSize2(700, 700)
+	window.SetMinimumSize2(800, 700)
 	window.SetWindowTitle("mpegps解析")
 
 	widget := widgets.NewQWidget(nil, 0)
@@ -96,12 +97,21 @@ func (ui *ui) Disp() {
 	window.SetCentralWidget(widget)
 
 	tableview := widgets.NewQTableView(nil)
+	tableview.SetSelectionMode(widgets.QAbstractItemView__SingleSelection)
+	tableview.SetSelectionBehavior(widgets.QAbstractItemView__SelectRows)
 	ui.model = NewCustomTableModel(nil)
 	tableview.SetModel(ui.model)
 
 	treeview := widgets.NewQTreeView(nil)
-	model := NewCustomTreeModel(nil)
-	treeview.SetModel(model)
+	//model := NewCustomTreeModel(nil)
+	model2 := gui.NewQStandardItemModel(nil)
+	item1 := gui.NewQStandardItem2("vahi-daemon")
+	model2.SetItem2(0, item1)
+	item2 := gui.NewQStandardItem2("hello")
+	item1.AppendRow2(item2)
+	item3 := gui.NewQStandardItem2("world")
+	item1.AppendRow2(item3)
+	treeview.SetModel(model2)
 
 	textedit := widgets.NewQTextEdit(nil)
 

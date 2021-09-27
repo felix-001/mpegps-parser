@@ -1,17 +1,17 @@
 package main
 
 import (
-	"gui"
 	"log"
 	"parser"
+	"ui"
 )
 
 const max int = 100
 
 func main() {
 	log.SetFlags(log.Lshortfile)
-	ch := make(chan *gui.TableItem, max)
-	gui := gui.New(ch)
+	ch := make(chan *ui.TableItem, max)
+	ui := ui.New(ch)
 	go parser.Process(ch)
-	gui.Disp()
+	ui.Disp()
 }

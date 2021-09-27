@@ -1,6 +1,6 @@
 // +build !ios
 
-package gui
+package ui
 
 /*
 #cgo CFLAGS: -pipe -O2 -arch x86_64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk -mmacosx-version-min=10.12 -Wall -W -fPIC -DQT_NO_DEBUG -DQT_WIDGETS_LIB -DQT_GUI_LIB -DQT_QML_LIB -DQT_NETWORK_LIB -DQT_CORE_LIB

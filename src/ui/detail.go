@@ -1,4 +1,4 @@
-package gui
+package ui
 
 import (
 	"github.com/therecipe/qt/core"
@@ -88,6 +88,7 @@ func (m *CustomTreeModel) init() {
 	thirdChild := NewTreeItem(nil).initWith([]string{"jimmy", "bob"})
 
 	firstChild.appendChild(secondChild)
+	secondChild.appendChild(thirdChild)
 	secondChild.appendChild(thirdChild)
 	m.rootItem.appendChild(firstChild)
 
