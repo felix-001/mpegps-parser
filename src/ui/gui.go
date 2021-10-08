@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"log"
 	"os"
 
 	"github.com/therecipe/qt/core"
@@ -33,6 +34,7 @@ func (m *CustomTableModel) headerData(section int, orientation core.Qt__Orientat
 		return m.HeaderDataDefault(section, orientation, role)
 	}
 
+	// todo 加入length字段
 	switch section {
 	case 0:
 		return core.NewQVariant1("offset")
@@ -97,6 +99,9 @@ func (ui *ui) Disp() {
 	window.SetCentralWidget(widget)
 
 	tableview := widgets.NewQTableView(nil)
+	tableview.ConnectClicked(func(index *core.QModelIndex) {
+		log.Println("ConnectClicked", index)
+	})
 	tableview.SetSelectionMode(widgets.QAbstractItemView__SingleSelection)
 	tableview.SetSelectionBehavior(widgets.QAbstractItemView__SelectRows)
 	ui.model = NewCustomTableModel(nil)
@@ -111,6 +116,12 @@ func (ui *ui) Disp() {
 	item1.AppendRow2(item2)
 	item3 := gui.NewQStandardItem2("world")
 	item1.AppendRow2(item3)
+	item4 := gui.NewQStandardItem2("111")
+	item3.AppendRow2(item4)
+	item5 := gui.NewQStandardItem2("change")
+	model2.SetItem2(0, item5)
+	item6 := gui.NewQStandardItem2("222")
+	item5.AppendRow2(item6)
 	treeview.SetModel(model2)
 
 	textedit := widgets.NewQTextEdit(nil)
@@ -131,6 +142,7 @@ func (ui *ui) Disp() {
 func (ui *ui) ShowData(ch chan *TableItem) {
 	for {
 		if data, ok := <-ch; ok {
+			// todo tabview 也使用standrand model
 			ui.model.Add(*data)
 		}
 	}
