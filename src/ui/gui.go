@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"log"
 	"os"
 
@@ -98,15 +99,6 @@ func (ui *ui) Disp() {
 	widget.SetLayout(widgets.NewQVBoxLayout())
 	window.SetCentralWidget(widget)
 
-	tableview := widgets.NewQTableView(nil)
-	tableview.ConnectClicked(func(index *core.QModelIndex) {
-		log.Println("ConnectClicked", index)
-	})
-	tableview.SetSelectionMode(widgets.QAbstractItemView__SingleSelection)
-	tableview.SetSelectionBehavior(widgets.QAbstractItemView__SelectRows)
-	ui.model = NewCustomTableModel(nil)
-	tableview.SetModel(ui.model)
-
 	treeview := widgets.NewQTreeView(nil)
 	//model := NewCustomTreeModel(nil)
 	model2 := gui.NewQStandardItemModel(nil)
@@ -123,6 +115,28 @@ func (ui *ui) Disp() {
 	item6 := gui.NewQStandardItem2("222")
 	item5.AppendRow2(item6)
 	treeview.SetModel(model2)
+
+	tableview := widgets.NewQTableView(nil)
+	tableview.SetSelectionMode(widgets.QAbstractItemView__SingleSelection)
+	tableview.SetSelectionBehavior(widgets.QAbstractItemView__SelectRows)
+	ui.model = NewCustomTableModel(nil)
+	tableview.ConnectClicked(func(index *core.QModelIndex) {
+		log.Println("ConnectClicked", index)
+		row := index.Row()
+		log.Println("row", row)
+		idx := ui.model.Index(row, 0, nil)
+		d1 := idx.Data(0)
+		log.Println("d1", d1.ToLongLong(nil))
+		data := index.Data(0)
+		s := data.TypeName()
+		log.Println("typename:", s)
+		s1 := data.ToString()
+		log.Println(s1)
+		item1 := gui.NewQStandardItem2(fmt.Sprintf("%d", d1.ToLongLong(nil)))
+		model2.SetItem2(0, item1)
+
+	})
+	tableview.SetModel(ui.model)
 
 	textedit := widgets.NewQTextEdit(nil)
 
