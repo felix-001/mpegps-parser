@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"log"
 	"os"
 
@@ -38,7 +37,7 @@ func (m *CustomTableModel) headerData(section int, orientation core.Qt__Orientat
 	// todo 加入length字段
 	switch section {
 	case 0:
-		return core.NewQVariant1("offset")
+		return core.NewQVariant1("偏移")
 	case 1:
 		return core.NewQVariant1("包类型")
 	case 2:
@@ -62,7 +61,7 @@ func (m *CustomTableModel) data(index *core.QModelIndex, role int) *core.QVarian
 
 	item := m.modelData[index.Row()]
 	switch m.HeaderData(index.Column(), core.Qt__Horizontal, role).ToString() {
-	case "offset":
+	case "偏移":
 		return core.NewQVariant1(item.Offset)
 	case "包类型":
 		return core.NewQVariant1(item.PktType)
@@ -110,6 +109,7 @@ func (ui *ui) Disp() {
 	item1.AppendRow2(item3)
 	item4 := gui.NewQStandardItem2("111")
 	item3.AppendRow2(item4)
+	item3.Parent()
 	item5 := gui.NewQStandardItem2("change")
 	model2.SetItem2(0, item5)
 	item6 := gui.NewQStandardItem2("222")
@@ -122,18 +122,8 @@ func (ui *ui) Disp() {
 	ui.model = NewCustomTableModel(nil)
 	tableview.ConnectClicked(func(index *core.QModelIndex) {
 		log.Println("ConnectClicked", index)
-		row := index.Row()
-		log.Println("row", row)
-		idx := ui.model.Index(row, 0, nil)
-		d1 := idx.Data(0)
-		log.Println("d1", d1.ToLongLong(nil))
-		data := index.Data(0)
-		s := data.TypeName()
-		log.Println("typename:", s)
-		s1 := data.ToString()
-		log.Println(s1)
-		item1 := gui.NewQStandardItem2(fmt.Sprintf("%d", d1.ToLongLong(nil)))
-		model2.SetItem2(0, item1)
+		//offset := ui.model.Index(index.Row(), 0, nil).Data(0).ToLongLong(nil)
+		//typ := ui.model.Index(index.Row(), 0, nil).Data(0).ToString()
 
 	})
 	tableview.SetModel(ui.model)
