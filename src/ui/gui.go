@@ -2,6 +2,7 @@ package ui
 
 import (
 	"log"
+	"ntree"
 	"os"
 
 	"github.com/therecipe/qt/core"
@@ -78,8 +79,9 @@ func (m *CustomTableModel) add(item TableItem) {
 }
 
 type ui struct {
-	model *CustomTableModel
-	ch    chan *TableItem
+	model     *CustomTableModel
+	ch        chan *TableItem
+	treeModel *gui.QStandardItemModel
 }
 
 func New(ch chan *TableItem) *ui {
@@ -101,6 +103,7 @@ func (ui *ui) Disp() {
 	treeview := widgets.NewQTreeView(nil)
 	//model := NewCustomTreeModel(nil)
 	model2 := gui.NewQStandardItemModel(nil)
+	ui.treeModel = model2
 	item1 := gui.NewQStandardItem2("vahi-daemon")
 	model2.SetItem2(0, item1)
 	item2 := gui.NewQStandardItem2("hello")
@@ -115,6 +118,7 @@ func (ui *ui) Disp() {
 	item6 := gui.NewQStandardItem2("222")
 	item5.AppendRow2(item6)
 	treeview.SetModel(model2)
+	ui.TestTree()
 
 	tableview := widgets.NewQTableView(nil)
 	tableview.SetSelectionMode(widgets.QAbstractItemView__SingleSelection)
@@ -150,4 +154,40 @@ func (ui *ui) ShowData(ch chan *TableItem) {
 			ui.model.Add(*data)
 		}
 	}
+}
+
+func callback(node *ntree.NTree, levelChange bool, opaque interface{}) interface{} {
+	ptr := opaque.(*gui.QStandardItem)
+	item := gui.NewQStandardItem2(node.Data.(string))
+	ptr.AppendRow2(item)
+	return item
+}
+
+func (ui *ui) TestTree() {
+	root := ntree.New("root")
+
+	dog := ntree.New("dog")
+	cat := ntree.New("cat")
+	pig := ntree.New("pig")
+	ani := ntree.New("animal")
+	ani.Append(dog)
+	ani.Append(cat)
+	ani.Append(pig)
+
+	jz := ntree.New("饺子")
+	bi := ntree.New("饼")
+
+	chb := ntree.New("葱花饼")
+	tb := ntree.New("糖饼")
+	bi.Append(chb)
+	bi.Append(tb)
+	food := ntree.New("food")
+	food.Append(jz)
+	food.Append(bi)
+
+	root.Append(ani)
+	root.Append(food)
+	item := gui.NewQStandardItem2("root")
+	ui.treeModel.SetItem2(0, item)
+	root.Traverse(callback, item)
 }

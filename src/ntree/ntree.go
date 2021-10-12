@@ -16,12 +16,11 @@ func (t *NTree) Append(node *NTree) {
 	t.Childs = append(t.Childs, node)
 }
 
-type TraverseFunc func(node *NTree, levelChange bool, opaque interface{})
+type TraverseFunc func(node *NTree, levelChange bool, opaque interface{}) interface{}
 
 func (t *NTree) Traverse(cb TraverseFunc, opaque interface{}) {
-	cb(t, true, opaque)
+	opaque = cb(t, false, opaque)
 	for _, node := range t.Childs {
-		cb(node, false, opaque)
 		node.Traverse(cb, opaque)
 	}
 }
