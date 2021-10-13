@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"ntree"
 	"os"
 	"param"
 	"ui"
@@ -43,13 +44,18 @@ type FieldInfo struct {
 	item string
 }
 
+type PktInfo struct {
+	Type   string
+	Status string
+	Offset int
+	Detail *ntree.NTree
+}
+
 type PsDecoder struct {
 	videoStreamType    uint32
 	audioStreamType    uint32
 	br                 bitreader.BitReader
 	psHeader           map[string]uint32
-	handlers           map[int]func() (*ui.TableItem, error)
-	psHeaderFields     []FieldInfo
 	pktCnt             int
 	fileSize           int
 	psBuf              *[]byte
@@ -84,10 +90,12 @@ func (dec *PsDecoder) decodePsPkts() error {
 			log.Printf("check startCode error: 0x%x pos:%d, fileSize:%d\n", startCode, dec.getPos(), dec.fileSize)
 			return ErrParsePakcet
 		}
-		pos := dec.getPos()
-		item, _ := handler()
-		item.Offset = pos
-		dec.ch <- item
+		if startCode != StartCodePS {
+			pos := dec.getPos()
+			item, _ := handler()
+			item.Offset = pos
+			dec.ch <- item
+		}
 	}
 	return nil
 }
@@ -382,21 +390,18 @@ func (dec *PsDecoder) decodePES(pesType int) error {
 	return nil
 }
 
-func (dec *PsDecoder) decodeVideoPes() (*ui.TableItem, error) {
-	if dec.param.Verbose {
-		log.Println("=== video ===")
-	}
+func (dec *PsDecoder) decodeVideoPes() (*PktInfo, error) {
 	dec.totalVideoFrameCnt++
-	item := &ui.TableItem{
-		PktType: "video pes",
-		Status:  "Error",
+	info := &PktInfo{
+		Type:   "video pes",
+		Status: "OK",
 	}
 	err := dec.decodePES(VideoPES)
 	if err != nil {
-		return item, err
+		info.Status = "Err"
+		return info, err
 	}
-	item.Status = "OK"
-	return item, nil
+	return info, nil
 }
 
 func (decoder *PsDecoder) decodePsHeader() (*ui.TableItem, error) {
@@ -407,7 +412,22 @@ func (decoder *PsDecoder) decodePsHeader() (*ui.TableItem, error) {
 		PktType: "pack header",
 		Status:  "OK",
 	}
-	psHeaderFields := decoder.psHeaderFields
+	psHeaderFields := []FieldInfo{
+		{2, "fixed"},
+		{3, "system_clock_refrence_base1"},
+		{1, "marker_bit1"},
+		{15, "system_clock_refrence_base2"},
+		{1, "marker_bit2"},
+		{15, "system_clock_refrence_base3"},
+		{1, "marker_bit3"},
+		{9, "system_clock_reference_extension"},
+		{1, "marker_bit4"},
+		{22, "program_mux_rate"},
+		{1, "marker_bit5"},
+		{1, "marker_bit6"},
+		{5, "reserved"},
+		{3, "pack_stuffing_length"},
+	}
 	for _, field := range psHeaderFields {
 		val, err := decoder.br.Read32(field.len)
 		if err != nil {
@@ -467,6 +487,14 @@ func (dec *PsDecoder) openAudioFile() error {
 	return nil
 }
 
+func (dec *PsDecoder) ParseDetail(offset int, typ string) (*ntree.NTree, error) {
+	switch typ {
+	case "video pes":
+		return dec.decodeVideoPes()
+	}
+	return nil, nil
+}
+
 func (dec *PsDecoder) Run() {
 	go dec.decodePsPkts()
 	dec.showInfo()
@@ -481,38 +509,14 @@ func New(param *param.ConsoleParam, ch chan *ui.TableItem) *PsDecoder {
 	log.Println(param.PsFile, "file size:", len(psBuf))
 	br := bitreader.NewReader(bytes.NewReader(psBuf))
 	decoder := &PsDecoder{
-		br:             br,
-		psHeader:       make(map[string]uint32),
-		handlers:       make(map[int]func() (*ui.TableItem, error)),
-		psHeaderFields: make([]FieldInfo, 14),
-		fileSize:       len(psBuf),
-		psBuf:          &psBuf,
-		param:          param,
-		ch:             ch,
+		br:       br,
+		psHeader: make(map[string]uint32),
+		fileSize: len(psBuf),
+		psBuf:    &psBuf,
+		param:    param,
+		ch:       ch,
 	}
-	decoder.handlers = map[int]func() (*ui.TableItem, error){
-		StartCodePS:    decoder.decodePsHeader,
-		StartCodeSYS:   decoder.decodeSystemHeader,
-		StartCodeMAP:   decoder.decodeProgramStreamMap,
-		StartCodeVideo: decoder.decodeVideoPes,
-		StartCodeAudio: decoder.decodeAudioPes,
-	}
-	decoder.psHeaderFields = []FieldInfo{
-		{2, "fixed"},
-		{3, "system_clock_refrence_base1"},
-		{1, "marker_bit1"},
-		{15, "system_clock_refrence_base2"},
-		{1, "marker_bit2"},
-		{15, "system_clock_refrence_base3"},
-		{1, "marker_bit3"},
-		{9, "system_clock_reference_extension"},
-		{1, "marker_bit4"},
-		{22, "program_mux_rate"},
-		{1, "marker_bit5"},
-		{1, "marker_bit6"},
-		{5, "reserved"},
-		{3, "pack_stuffing_length"},
-	}
+
 	if param.DumpAudio {
 		err := decoder.openAudioFile()
 		if err != nil {

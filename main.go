@@ -17,7 +17,7 @@ func main() {
 		return
 	}
 	parser := parser.New(param, ch)
-	ui := ui.New(ch)
+	ui := ui.New(ch, parser)
 	parser.Run()
 	ui.Disp()
 }

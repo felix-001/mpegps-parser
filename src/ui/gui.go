@@ -1,9 +1,9 @@
 package ui
 
 import (
-	"log"
 	"ntree"
 	"os"
+	"reader"
 
 	"github.com/therecipe/qt/core"
 	"github.com/therecipe/qt/gui"
@@ -79,13 +79,14 @@ func (m *CustomTableModel) add(item TableItem) {
 }
 
 type ui struct {
-	model     *CustomTableModel
-	ch        chan *TableItem
-	treeModel *gui.QStandardItemModel
+	model        *CustomTableModel
+	ch           chan *TableItem
+	treeModel    *gui.QStandardItemModel
+	detailReader reader.DetailReader
 }
 
-func New(ch chan *TableItem) *ui {
-	return &ui{ch: ch}
+func New(ch chan *TableItem, detailReader reader.DetailReader) *ui {
+	return &ui{ch: ch, detailReader: detailReader}
 }
 
 func (ui *ui) Disp() {
@@ -125,9 +126,13 @@ func (ui *ui) Disp() {
 	tableview.SetSelectionBehavior(widgets.QAbstractItemView__SelectRows)
 	ui.model = NewCustomTableModel(nil)
 	tableview.ConnectClicked(func(index *core.QModelIndex) {
-		log.Println("ConnectClicked", index)
-		//offset := ui.model.Index(index.Row(), 0, nil).Data(0).ToLongLong(nil)
-		//typ := ui.model.Index(index.Row(), 0, nil).Data(0).ToString()
+		offset := ui.model.Index(index.Row(), 0, nil).Data(0).ToLongLong(nil)
+		typ := ui.model.Index(index.Row(), 0, nil).Data(0).ToString()
+		tree, _ := ui.detailReader.ParseDetail(int(offset), typ)
+		var item *gui.QStandardItem
+		ret := tree.Traverse(callback, item)
+		item = ret.(*gui.QStandardItem)
+		ui.treeModel.SetItem2(0, item)
 
 	})
 	tableview.SetModel(ui.model)
