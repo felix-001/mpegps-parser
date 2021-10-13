@@ -159,6 +159,9 @@ func (ui *ui) ShowData(ch chan *TableItem) {
 func callback(node *ntree.NTree, levelChange bool, opaque interface{}) interface{} {
 	ptr := opaque.(*gui.QStandardItem)
 	item := gui.NewQStandardItem2(node.Data.(string))
+	if ptr == nil {
+		return item
+	}
 	ptr.AppendRow2(item)
 	return item
 }
@@ -187,7 +190,9 @@ func (ui *ui) TestTree() {
 
 	root.Append(ani)
 	root.Append(food)
-	item := gui.NewQStandardItem2("root")
+	var item *gui.QStandardItem
+	//item := gui.NewQStandardItem2("root")
+	ret := root.Traverse(callback, item)
+	item = ret.(*gui.QStandardItem)
 	ui.treeModel.SetItem2(0, item)
-	root.Traverse(callback, item)
 }
