@@ -282,7 +282,7 @@ func (br *bitreader) fill() error {
 
 	// 这里边传入的br.raw[:total]是一个输出参数，是一个slice
 	// Read函数内部根据slice的长度输出数据的长度
-	n, err := br.r.Read(br.raw[:total]) // r是标准库的byteReader
+	n, err := br.r.Read(br.raw[:total]) // r是标准库的bytes.reader
 	if err != nil {
 		return err
 	}

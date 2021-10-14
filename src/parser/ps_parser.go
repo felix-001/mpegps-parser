@@ -2,9 +2,9 @@ package parser
 
 import (
 	"bitreader"
+	"bufio"
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -44,6 +44,11 @@ type FieldInfo struct {
 	item string
 }
 
+type ItemInfo struct {
+	key   string
+	value string
+}
+
 type PktInfo struct {
 	Type   string
 	Status string
@@ -55,7 +60,6 @@ type PsDecoder struct {
 	videoStreamType    uint32
 	audioStreamType    uint32
 	br                 bitreader.BitReader
-	psHeader           map[string]uint32
 	pktCnt             int
 	fileSize           int
 	psBuf              *[]byte
@@ -73,51 +77,65 @@ type PsDecoder struct {
 	ch                 chan *ui.TableItem
 }
 
-func (dec *PsDecoder) decodePsPkts() error {
-	for dec.getPos() < int64(dec.fileSize) {
-		startCode, err := dec.br.Read32(32)
+func (decoder *PsDecoder) decodePkt(startCode uint32) (typ string, tree *ntree.NTree, err error) {
+	switch startCode {
+	case StartCodePS:
+		typ = "pack header"
+		tree, err = decoder.decodePsHeader()
+	case StartCodeSYS:
+		typ = "system header"
+		tree, err = decoder.decodeSystemHeader()
+	case StartCodeMAP:
+		typ = "program stream map"
+		tree, err = decoder.decodeProgramStreamMap()
+	case StartCodeVideo:
+		typ = "video pes"
+		tree, err = decoder.decodeVideoPes()
+	case StartCodeAudio:
+		typ = "audio pes"
+		tree, err = decoder.decodeAudioPes()
+	}
+	return
+}
+
+func (decoder *PsDecoder) sendBasic(startCode uint32, typ string, status string) {
+	if startCode == StartCodePS {
+		return
+	}
+	item := &ui.TableItem{
+		Offset:  decoder.getPos(),
+		PktType: typ,
+		Status:  status,
+	}
+	decoder.ch <- item
+}
+
+func (decoder *PsDecoder) decodePkts() error {
+	for decoder.getPos() < int64(decoder.fileSize) {
+		startCode, err := decoder.br.Read32(32)
 		if err != nil {
 			log.Println(err)
 			return err
 		}
-		dec.pktCnt++
-		if dec.param.Verbose {
-			fmt.Println()
-			log.Printf("pkt count: %d pos: %d/%d", dec.pktCnt, dec.getPos(), dec.fileSize)
+		decoder.pktCnt++
+		typ, _, err := decoder.decodePkt(startCode)
+		status := "OK"
+		if err != nil {
+			status = "Error"
 		}
-		handler, ok := dec.handlers[int(startCode)]
-		if !ok {
-			log.Printf("check startCode error: 0x%x pos:%d, fileSize:%d\n", startCode, dec.getPos(), dec.fileSize)
-			return ErrParsePakcet
-		}
-		if startCode != StartCodePS {
-			pos := dec.getPos()
-			item, _ := handler()
-			item.Offset = pos
-			dec.ch <- item
-		}
+		decoder.sendBasic(startCode, typ, status)
 	}
 	return nil
 }
 
-func (dec *PsDecoder) decodeSystemHeader() (*ui.TableItem, error) {
+func (dec *PsDecoder) decodeSystemHeader() (*ntree.NTree, error) {
 	br := dec.br
 	syslens, err := br.Read32(16)
-	if dec.param.PrintSysHeader {
-		log.Println("=== ps system header === ")
-		log.Printf("\tsystem_header_length:%d", syslens)
-	}
-	item := &ui.TableItem{
-		PktType: "system header",
-		Status:  "OK",
-	}
 	if err != nil {
-		item.Status = "Error"
-		return item, err
+		return nil, err
 	}
-
 	br.Skip(uint(syslens) * 8)
-	return item, nil
+	return nil, nil
 }
 
 func (decoder *PsDecoder) getPos() int64 {
@@ -129,9 +147,6 @@ func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
 	br := decoder.br
 	for programStreamMapLen > 0 {
 		streamType, err := br.Read32(8)
-		if decoder.param.PrintPsm {
-			log.Printf("\t\tstream type: 0x%x", streamType)
-		}
 		if err != nil {
 			return err
 		}
@@ -145,15 +160,9 @@ func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
 		if elementaryStreamID >= 0xc0 && elementaryStreamID <= 0xdf {
 			decoder.audioStreamType = streamType
 		}
-		if decoder.param.PrintPsm {
-			log.Printf("\t\tstream id: 0x%x", elementaryStreamID)
-		}
 		elementaryStreamInfoLength, err := br.Read32(16)
 		if err != nil {
 			return err
-		}
-		if decoder.param.PrintPsm {
-			log.Printf("\t\telementary_stream_info_length: %d", elementaryStreamInfoLength)
 		}
 		br.Skip(uint(elementaryStreamInfoLength * 8))
 		programStreamMapLen -= (4 + elementaryStreamInfoLength)
@@ -161,58 +170,43 @@ func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
 	return nil
 }
 
-func (dec *PsDecoder) decodeProgramStreamMap() (*ui.TableItem, error) {
+func (dec *PsDecoder) decodeProgramStreamMap() (*ntree.NTree, error) {
 	br := dec.br
 	dec.psmCnt++
-	item := &ui.TableItem{
-		PktType: "program stream map",
-		Status:  "Error",
-	}
+
 	psmLen, err := br.Read32(16)
 	if err != nil {
-		return item, err
-	}
-	if dec.param.PrintPsm {
-		log.Println("=== program stream map ===")
-		log.Printf("\tprogram_stream_map_length: %d pos: %d", psmLen, dec.getPos())
+		return nil, err
 	}
 	//drop psm version info
 	br.Skip(16)
 	psmLen -= 2
 	programStreamInfoLen, err := br.Read32(16)
 	if err != nil {
-		return item, err
+		return nil, err
 	}
 	br.Skip(uint(programStreamInfoLen * 8))
 	psmLen -= (programStreamInfoLen + 2)
 	programStreamMapLen, err := br.Read32(16)
 	if err != nil {
-		return item, err
+		return nil, err
 	}
 	psmLen -= (2 + programStreamMapLen)
-	if dec.param.PrintPsm {
-		log.Printf("\tprogram_stream_info_length: %d", programStreamMapLen)
-	}
 
 	if err := dec.decodePsmNLoop(programStreamMapLen); err != nil {
-		return item, err
+		return nil, err
 	}
 
 	// crc 32
 	if psmLen != 4 {
-		if dec.param.PrintPsm {
-			log.Printf("psmLen: 0x%x", psmLen)
-		}
-		return item, ErrFormatPack
+		return nil, ErrFormatPack
 	}
 	br.Skip(32)
-	item.Status = "OK"
-	return item, nil
+	return nil, nil
 }
 
 func (dec *PsDecoder) decodeH264(data []byte, len uint32, err bool) error {
 	if dec.param.Verbose {
-		log.Printf("\t\th264 len : %d", len)
 		if data[4] == 0x67 {
 			log.Println("\t\tSPS")
 		}
@@ -239,9 +233,6 @@ func (dec *PsDecoder) decodeH264(data []byte, len uint32, err bool) error {
 }
 
 func (dec *PsDecoder) saveAudioPkt(data []byte, len uint32, err bool) error {
-	if dec.param.Verbose {
-		log.Printf("\t\taudio len : %d", len)
-	}
 	if !err && dec.audioFile != nil {
 		dec.writeAudioFrameToFile(data)
 	}
@@ -298,7 +289,6 @@ func (dec *PsDecoder) skipInvalidBytes(payloadLen uint32, pesType int, pesStartP
 	br := dec.br
 	pos := dec.GetNextPackPos()
 	skipLen := pos - int(dec.getPos())
-	log.Printf("pes start dump: % X\n", (*dec.psBuf)[pesStartPos:pesStartPos+16])
 	log.Printf("pes payload len err, expect: %d actual: %d", payloadLen, skipLen)
 	log.Printf("skip len: %d, next pack pos:%d", skipLen, pos)
 	skipBuf := make([]byte, skipLen)
@@ -315,21 +305,13 @@ func (dec *PsDecoder) skipInvalidBytes(payloadLen uint32, pesType int, pesStartP
 	return nil
 }
 
-func (dec *PsDecoder) decodeAudioPes() (*ui.TableItem, error) {
-	if dec.param.Verbose {
-		log.Println("=== Audio ===")
-	}
+func (dec *PsDecoder) decodeAudioPes() (*ntree.NTree, error) {
 	dec.totalAudioFrameCnt++
-	item := &ui.TableItem{
-		PktType: "audio pes",
-		Status:  "Error",
-	}
 	err := dec.decodePES(AudioPES)
 	if err != nil {
-		return item, err
+		return nil, err
 	}
-	item.Status = "OK"
-	return item, nil
+	return nil, nil
 }
 
 func (dec *PsDecoder) decodePESHeader() (uint32, error) {
@@ -351,10 +333,6 @@ func (dec *PsDecoder) decodePESHeader() (uint32, error) {
 		log.Println(err)
 		return 0, err
 	}
-	if dec.param.Verbose {
-		log.Printf("\tPES_packet_length: %d", payloadLen)
-		log.Printf("\tpes_header_data_length: %d", pesHeaderDataLen)
-	}
 	payloadLen--
 
 	/* pes header data */
@@ -366,9 +344,6 @@ func (dec *PsDecoder) decodePESHeader() (uint32, error) {
 func (dec *PsDecoder) decodePES(pesType int) error {
 	br := dec.br
 	pesStartPos := dec.getPos() - 4 // 4为startcode的长度
-	if dec.param.DumpPesStartBytes {
-		log.Printf("% X\n", (*dec.psBuf)[pesStartPos:pesStartPos+16])
-	}
 	payloadLen, err := dec.decodePESHeader()
 	if err != nil {
 		return err
@@ -390,28 +365,16 @@ func (dec *PsDecoder) decodePES(pesType int) error {
 	return nil
 }
 
-func (dec *PsDecoder) decodeVideoPes() (*PktInfo, error) {
+func (dec *PsDecoder) decodeVideoPes() (*ntree.NTree, error) {
 	dec.totalVideoFrameCnt++
-	info := &PktInfo{
-		Type:   "video pes",
-		Status: "OK",
-	}
 	err := dec.decodePES(VideoPES)
 	if err != nil {
-		info.Status = "Err"
-		return info, err
+		return nil, err
 	}
-	return info, nil
+	return nil, nil
 }
 
-func (decoder *PsDecoder) decodePsHeader() (*ui.TableItem, error) {
-	if decoder.param.Verbose {
-		log.Println("=== pack header ===")
-	}
-	item := &ui.TableItem{
-		PktType: "pack header",
-		Status:  "OK",
-	}
+func (decoder *PsDecoder) decodePsHeader() (*ntree.NTree, error) {
 	psHeaderFields := []FieldInfo{
 		{2, "fixed"},
 		{3, "system_clock_refrence_base1"},
@@ -432,21 +395,13 @@ func (decoder *PsDecoder) decodePsHeader() (*ui.TableItem, error) {
 		val, err := decoder.br.Read32(field.len)
 		if err != nil {
 			log.Printf("parse %s error", field.item)
-			item.Status = "Error"
-			return item, err
+			return nil, err
 		}
 		decoder.psHeader[field.item] = val
 	}
 	pack_stuffing_length := decoder.psHeader["pack_stuffing_length"]
 	decoder.br.Skip(uint(pack_stuffing_length * 8))
-	if decoder.param.PrintPsHeader {
-		b, err := json.MarshalIndent(decoder.psHeader, "", "  ")
-		if err != nil {
-			log.Println("error:", err)
-		}
-		fmt.Print(string(b) + "\n")
-	}
-	return item, nil
+	return nil, nil
 }
 
 func (dec *PsDecoder) writeH264FrameToFile(frame []byte) error {
@@ -487,16 +442,20 @@ func (dec *PsDecoder) openAudioFile() error {
 	return nil
 }
 
-func (dec *PsDecoder) ParseDetail(offset int, typ string) (*ntree.NTree, error) {
+func (decoder *PsDecoder) ParseDetail(offset int, typ string) (*ntree.NTree, error) {
 	switch typ {
 	case "video pes":
-		return dec.decodeVideoPes()
+		return decoder.decodeVideoPes()
+	case "audio pes":
+		return decoder.decodeAudioPes()
+	case "program stream map":
+		return decoder.decodeProgramStreamMap()
 	}
 	return nil, nil
 }
 
 func (dec *PsDecoder) Run() {
-	go dec.decodePsPkts()
+	go dec.decodePkts()
 	dec.showInfo()
 }
 
@@ -506,28 +465,15 @@ func New(param *param.ConsoleParam, ch chan *ui.TableItem) *PsDecoder {
 		log.Printf("open file: %s error", param.PsFile)
 		return nil
 	}
+	bufio.NewReader
 	log.Println(param.PsFile, "file size:", len(psBuf))
 	br := bitreader.NewReader(bytes.NewReader(psBuf))
 	decoder := &PsDecoder{
 		br:       br,
-		psHeader: make(map[string]uint32),
 		fileSize: len(psBuf),
 		psBuf:    &psBuf,
 		param:    param,
 		ch:       ch,
-	}
-
-	if param.DumpAudio {
-		err := decoder.openAudioFile()
-		if err != nil {
-			return nil
-		}
-	}
-	if param.DumpVideo {
-		err := decoder.openVideoFile()
-		if err != nil {
-			return nil
-		}
 	}
 	return decoder
 }
