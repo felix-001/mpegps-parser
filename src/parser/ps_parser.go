@@ -3,11 +3,9 @@ package parser
 import (
 	"bitreader"
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"ntree"
@@ -59,7 +57,7 @@ type PktInfo struct {
 type PsDecoder struct {
 	videoStreamType    uint32
 	audioStreamType    uint32
-	br                 bitreader.BitReader
+	br                 *bitreader.BitReader
 	pktCnt             int
 	fileSize           int
 	psBuf              *[]byte
@@ -112,60 +110,60 @@ func (decoder *PsDecoder) sendBasic(startCode uint32, typ string, status string)
 
 func (decoder *PsDecoder) decodePkts() error {
 	for decoder.getPos() < int64(decoder.fileSize) {
-		startCode, err := decoder.br.Read32(32)
+		startCode, err := decoder.br.Read(32)
 		if err != nil {
 			log.Println(err)
 			return err
 		}
 		decoder.pktCnt++
-		typ, _, err := decoder.decodePkt(startCode)
+		typ, _, err := decoder.decodePkt(uint32(startCode))
 		status := "OK"
 		if err != nil {
 			status = "Error"
 		}
-		decoder.sendBasic(startCode, typ, status)
+		decoder.sendBasic(uint32(startCode), typ, status)
 	}
 	return nil
 }
 
 func (dec *PsDecoder) decodeSystemHeader() (*ntree.NTree, error) {
 	br := dec.br
-	syslens, err := br.Read32(16)
+	syslens, err := br.Read(16)
 	if err != nil {
 		return nil, err
 	}
-	br.Skip(uint(syslens) * 8)
+	br.Read(uint(syslens) * 8)
 	return nil, nil
 }
 
 func (decoder *PsDecoder) getPos() int64 {
-	pos := decoder.br.Size() - int64(decoder.br.Len())
-	return pos
+	offset, _ := decoder.br.Offset()
+	return offset
 }
 
 func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
 	br := decoder.br
 	for programStreamMapLen > 0 {
-		streamType, err := br.Read32(8)
+		streamType, err := br.Read(8)
 		if err != nil {
 			return err
 		}
-		elementaryStreamID, err := br.Read32(8)
+		elementaryStreamID, err := br.Read(8)
 		if err != nil {
 			return err
 		}
 		if elementaryStreamID >= 0xe0 && elementaryStreamID <= 0xef {
-			decoder.videoStreamType = streamType
+			decoder.videoStreamType = uint32(streamType)
 		}
 		if elementaryStreamID >= 0xc0 && elementaryStreamID <= 0xdf {
-			decoder.audioStreamType = streamType
+			decoder.audioStreamType = uint32(streamType)
 		}
-		elementaryStreamInfoLength, err := br.Read32(16)
+		elementaryStreamInfoLength, err := br.Read(16)
 		if err != nil {
 			return err
 		}
-		br.Skip(uint(elementaryStreamInfoLength * 8))
-		programStreamMapLen -= (4 + elementaryStreamInfoLength)
+		br.Read(uint(elementaryStreamInfoLength * 8))
+		programStreamMapLen -= (4 + uint32(elementaryStreamInfoLength))
 	}
 	return nil
 }
@@ -174,26 +172,26 @@ func (dec *PsDecoder) decodeProgramStreamMap() (*ntree.NTree, error) {
 	br := dec.br
 	dec.psmCnt++
 
-	psmLen, err := br.Read32(16)
+	psmLen, err := br.Read(16)
 	if err != nil {
 		return nil, err
 	}
 	//drop psm version info
-	br.Skip(16)
+	br.Read(16)
 	psmLen -= 2
-	programStreamInfoLen, err := br.Read32(16)
+	programStreamInfoLen, err := br.Read(16)
 	if err != nil {
 		return nil, err
 	}
-	br.Skip(uint(programStreamInfoLen * 8))
+	br.Read(uint(programStreamInfoLen * 8))
 	psmLen -= (programStreamInfoLen + 2)
-	programStreamMapLen, err := br.Read32(16)
+	programStreamMapLen, err := br.Read(16)
 	if err != nil {
 		return nil, err
 	}
 	psmLen -= (2 + programStreamMapLen)
 
-	if err := dec.decodePsmNLoop(programStreamMapLen); err != nil {
+	if err := dec.decodePsmNLoop(uint32(programStreamMapLen)); err != nil {
 		return nil, err
 	}
 
@@ -201,7 +199,7 @@ func (dec *PsDecoder) decodeProgramStreamMap() (*ntree.NTree, error) {
 	if psmLen != 4 {
 		return nil, ErrFormatPack
 	}
-	br.Skip(32)
+	br.Read(32)
 	return nil, nil
 }
 
@@ -280,27 +278,29 @@ func (dec *PsDecoder) GetNextPackPos() int {
 	return dec.fileSize
 }
 
-func (dec *PsDecoder) skipInvalidBytes(payloadLen uint32, pesType int, pesStartPos int64) error {
+func (dec *PsDecoder) ReadInvalidBytes(payloadLen uint32, pesType int, pesStartPos int64) error {
 	if pesType == VideoPES {
 		dec.errVideoFrameCnt++
 	} else {
 		dec.errAudioFrameCnt++
 	}
-	br := dec.br
+	//br := dec.br
 	pos := dec.GetNextPackPos()
-	skipLen := pos - int(dec.getPos())
-	log.Printf("pes payload len err, expect: %d actual: %d", payloadLen, skipLen)
-	log.Printf("skip len: %d, next pack pos:%d", skipLen, pos)
-	skipBuf := make([]byte, skipLen)
+	ReadLen := pos - int(dec.getPos())
+	log.Printf("pes payload len err, expect: %d actual: %d", payloadLen, ReadLen)
+	log.Printf("Read len: %d, next pack pos:%d", ReadLen, pos)
+	ReadBuf := make([]byte, ReadLen)
 	// 由于payloadLen是错误的，所以下一个startcode和当前位置之间的字节需要丢弃
-	if _, err := io.ReadAtLeast(br, skipBuf, int(skipLen)); err != nil {
-		log.Println(err)
-		return err
-	}
+	/*
+		if _, err := io.ReadAtLeast(br, ReadBuf, int(ReadLen)); err != nil {
+			log.Println(err)
+			return err
+		}
+	*/
 	if pesType == AudioPES {
-		dec.saveAudioPkt(skipBuf, uint32(skipLen), true)
+		dec.saveAudioPkt(ReadBuf, uint32(ReadLen), true)
 	} else {
-		dec.decodeH264(skipBuf, uint32(skipLen), true)
+		dec.decodeH264(ReadBuf, uint32(ReadLen), true)
 	}
 	return nil
 }
@@ -317,18 +317,18 @@ func (dec *PsDecoder) decodeAudioPes() (*ntree.NTree, error) {
 func (dec *PsDecoder) decodePESHeader() (uint32, error) {
 	br := dec.br
 	/* payload length */
-	payloadLen, err := br.Read32(16)
+	payloadLen, err := br.Read(16)
 	if err != nil {
 		log.Println(err)
 		return 0, err
 	}
 
 	/* flags: pts_dts_flags ... */
-	br.Skip(16) // 跳过各种flags,比如pts_dts_flags
+	br.Read(16) // 跳过各种flags,比如pts_dts_flags
 	payloadLen -= 2
 
 	/* pes header data length */
-	pesHeaderDataLen, err := br.Read32(8)
+	pesHeaderDataLen, err := br.Read(8)
 	if err != nil {
 		log.Println(err)
 		return 0, err
@@ -336,26 +336,28 @@ func (dec *PsDecoder) decodePESHeader() (uint32, error) {
 	payloadLen--
 
 	/* pes header data */
-	br.Skip(uint(pesHeaderDataLen * 8))
+	br.Read(uint(pesHeaderDataLen * 8))
 	payloadLen -= pesHeaderDataLen
-	return payloadLen, nil
+	return uint32(payloadLen), nil
 }
 
 func (dec *PsDecoder) decodePES(pesType int) error {
-	br := dec.br
+	//br := dec.br
 	pesStartPos := dec.getPos() - 4 // 4为startcode的长度
 	payloadLen, err := dec.decodePESHeader()
 	if err != nil {
 		return err
 	}
 	if !dec.isPayloadLenValid(payloadLen, pesType, pesStartPos) {
-		dec.skipInvalidBytes(payloadLen, pesType, pesStartPos)
+		dec.ReadInvalidBytes(payloadLen, pesType, pesStartPos)
 		return ErrCheckPayloadLen
 	}
 	payloadData := make([]byte, payloadLen)
-	if _, err := io.ReadAtLeast(br, payloadData, int(payloadLen)); err != nil {
-		return err
-	}
+	/*
+		if _, err := io.ReadAtLeast(br, payloadData, int(payloadLen)); err != nil {
+			return err
+		}
+	*/
 	if pesType == VideoPES {
 		dec.decodeH264(payloadData, payloadLen, false)
 	} else {
@@ -392,15 +394,15 @@ func (decoder *PsDecoder) decodePsHeader() (*ntree.NTree, error) {
 		{3, "pack_stuffing_length"},
 	}
 	for _, field := range psHeaderFields {
-		val, err := decoder.br.Read32(field.len)
+		_, err := decoder.br.Read(field.len)
 		if err != nil {
 			log.Printf("parse %s error", field.item)
 			return nil, err
 		}
-		decoder.psHeader[field.item] = val
+		//decoder.psHeader[field.item] = uint32(val)
 	}
-	pack_stuffing_length := decoder.psHeader["pack_stuffing_length"]
-	decoder.br.Skip(uint(pack_stuffing_length * 8))
+	//pack_stuffing_length := decoder.psHeader["pack_stuffing_length"]
+	//decoder.br.Read(uint(pack_stuffing_length * 8))
 	return nil, nil
 }
 
@@ -459,15 +461,30 @@ func (dec *PsDecoder) Run() {
 	dec.showInfo()
 }
 
+func GetPosOfFile(f *os.File) {
+	// https://stackoverflow.com/questions/10901351/fgetpos-available-in-go-want-to-find-file-position
+
+}
+
 func New(param *param.ConsoleParam, ch chan *ui.TableItem) *PsDecoder {
 	psBuf, err := ioutil.ReadFile(param.PsFile)
 	if err != nil {
 		log.Printf("open file: %s error", param.PsFile)
 		return nil
 	}
-	bufio.NewReader
+	f, err := os.Open(param.PsFile)
+	if err != nil {
+		log.Println(err)
+		return nil
+	}
+	r := bufio.NewReader(f)
+	fileInfo, err := os.Stat(param.PsFile)
+	if err != nil {
+		log.Println(err)
+		return nil
+	}
 	log.Println(param.PsFile, "file size:", len(psBuf))
-	br := bitreader.NewReader(bytes.NewReader(psBuf))
+	br := bitreader.New(r, f, fileInfo.Size())
 	decoder := &PsDecoder{
 		br:       br,
 		fileSize: len(psBuf),

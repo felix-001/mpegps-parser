@@ -1,23 +1,30 @@
 package bitreader
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"io"
+)
 
 // 按byte读取
 type ByteReader interface {
 	Read(p []byte) (n int, err error)
-	Len() int
-	Size() int64
 }
 
 type BitReader struct {
-	r    ByteReader
-	data uint64
+	size   int64
+	r      ByteReader
+	seeker io.Seeker
+	data   uint64
 	// 剩余多少bit没有被读取
 	remain uint
 }
 
-func New(r ByteReader) *BitReader {
-	return &BitReader{r: r}
+func New(r ByteReader, seeker io.Seeker, size int64) *BitReader {
+	return &BitReader{r: r, size: size, seeker: seeker}
+}
+
+func (br *BitReader) Size() int64 {
+	return br.size
 }
 
 // 从外部数据源读取8个字节存放到br.data
@@ -58,4 +65,12 @@ func (br *BitReader) Read(n uint) (result uint64, err error) {
 	result = br.read(n)
 	br.update(n)
 	return
+}
+
+func (br *BitReader) Offset() (int64, error) {
+	offset, err := br.seeker.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return 0, err
+	}
+	return offset, nil
 }
