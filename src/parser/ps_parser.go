@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"ntree"
 	"os"
@@ -58,9 +58,9 @@ type PsDecoder struct {
 	videoStreamType    uint32
 	audioStreamType    uint32
 	br                 *bitreader.BitReader
+	byteReader         io.Reader
+	f                  *os.File
 	pktCnt             int
-	fileSize           int
-	psBuf              *[]byte
 	errVideoFrameCnt   int
 	errAudioFrameCnt   int
 	totalVideoFrameCnt int
@@ -92,6 +92,8 @@ func (decoder *PsDecoder) decodePkt(startCode uint32) (typ string, tree *ntree.N
 	case StartCodeAudio:
 		typ = "audio pes"
 		tree, err = decoder.decodeAudioPes()
+	default:
+		err = ErrNotFoundStartCode
 	}
 	return
 }
@@ -100,8 +102,9 @@ func (decoder *PsDecoder) sendBasic(startCode uint32, typ string, status string)
 	if startCode == StartCodePS {
 		return
 	}
+	offset, _ := decoder.br.Offset()
 	item := &ui.TableItem{
-		Offset:  decoder.getPos(),
+		Offset:  int64(offset),
 		PktType: typ,
 		Status:  status,
 	}
@@ -109,14 +112,24 @@ func (decoder *PsDecoder) sendBasic(startCode uint32, typ string, status string)
 }
 
 func (decoder *PsDecoder) decodePkts() error {
-	for decoder.getPos() < int64(decoder.fileSize) {
-		startCode, err := decoder.br.Read(32)
+	br := decoder.br
+	offset, err := br.Offset()
+	if err != nil {
+		return err
+	}
+	// todo 这里offset不能这样判断
+	for offset < br.Size() {
+		startCode, err := br.Read(32)
 		if err != nil {
 			log.Println(err)
 			return err
 		}
 		decoder.pktCnt++
 		typ, _, err := decoder.decodePkt(uint32(startCode))
+		if err != nil {
+			log.Println(startCode, err)
+			return err
+		}
 		status := "OK"
 		if err != nil {
 			status = "Error"
@@ -134,11 +147,6 @@ func (dec *PsDecoder) decodeSystemHeader() (*ntree.NTree, error) {
 	}
 	br.Read(uint(syslens) * 8)
 	return nil, nil
-}
-
-func (decoder *PsDecoder) getPos() int64 {
-	offset, _ := decoder.br.Offset()
-	return offset
 }
 
 func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
@@ -251,13 +259,17 @@ func (dec *PsDecoder) isStartCodeValid(startCode uint32) bool {
 // 移动到当前位置+payloadLen位置，判断startcode是否正确
 // 如果startcode不正确，说明payloadLen是错误的
 func (dec *PsDecoder) isPayloadLenValid(payloadLen uint32, pesType int, pesStartPos int64) bool {
-	psBuf := *dec.psBuf
-	pos := dec.getPos() + int64(payloadLen)
-	if pos >= int64(dec.fileSize) {
+	offset, _ := dec.br.Offset()
+	pos := offset + int64(payloadLen)
+	if pos >= dec.br.Size() {
 		log.Println("reach file end, quit")
 		return false
 	}
-	packStartCode := binary.BigEndian.Uint32(psBuf[pos : pos+4])
+	buf := make([]byte, 4, 4)
+	if _, err := dec.f.ReadAt(buf, pos); err != nil {
+		return false
+	}
+	packStartCode := binary.BigEndian.Uint32(buf)
 	if !dec.isStartCodeValid(packStartCode) {
 		log.Printf("check payload len error, len: %d pes start pos: %d(0x%x), pesType:%d", payloadLen, pesStartPos, pesStartPos, pesType)
 		return false
@@ -265,17 +277,20 @@ func (dec *PsDecoder) isPayloadLenValid(payloadLen uint32, pesType int, pesStart
 	return true
 }
 
-func (dec *PsDecoder) GetNextPackPos() int {
-	pos := int(dec.getPos())
-	for pos < dec.fileSize-4 {
-		b := (*dec.psBuf)[pos : pos+4]
-		packStartCode := binary.BigEndian.Uint32(b)
-		if dec.isStartCodeValid((packStartCode)) {
-			return pos
+func (dec *PsDecoder) GetNextPackPos() int64 {
+	offset, _ := dec.br.Offset()
+	for offset < dec.br.Size()-4 {
+		buf := make([]byte, 4, 4)
+		if _, err := dec.f.ReadAt(buf, offset); err != nil {
+			return 0
 		}
-		pos++
+		packStartCode := binary.BigEndian.Uint32(buf)
+		if dec.isStartCodeValid((packStartCode)) {
+			return offset
+		}
+		offset++
 	}
-	return dec.fileSize
+	return dec.br.Size()
 }
 
 func (dec *PsDecoder) ReadInvalidBytes(payloadLen uint32, pesType int, pesStartPos int64) error {
@@ -284,23 +299,22 @@ func (dec *PsDecoder) ReadInvalidBytes(payloadLen uint32, pesType int, pesStartP
 	} else {
 		dec.errAudioFrameCnt++
 	}
-	//br := dec.br
+	br := dec.br
 	pos := dec.GetNextPackPos()
-	ReadLen := pos - int(dec.getPos())
-	log.Printf("pes payload len err, expect: %d actual: %d", payloadLen, ReadLen)
-	log.Printf("Read len: %d, next pack pos:%d", ReadLen, pos)
-	ReadBuf := make([]byte, ReadLen)
+	offset, _ := br.Offset()
+	readLen := pos - offset
+	log.Printf("pes payload len err, expect: %d actual: %d", payloadLen, readLen)
+	log.Printf("Read len: %d, next pack pos:%d", readLen, pos)
+	readBuf := make([]byte, readLen)
 	// 由于payloadLen是错误的，所以下一个startcode和当前位置之间的字节需要丢弃
-	/*
-		if _, err := io.ReadAtLeast(br, ReadBuf, int(ReadLen)); err != nil {
-			log.Println(err)
-			return err
-		}
-	*/
+	if _, err := dec.byteReader.Read(readBuf); err != nil {
+		log.Println(err)
+		return err
+	}
 	if pesType == AudioPES {
-		dec.saveAudioPkt(ReadBuf, uint32(ReadLen), true)
+		dec.saveAudioPkt(readBuf, uint32(readLen), true)
 	} else {
-		dec.decodeH264(ReadBuf, uint32(ReadLen), true)
+		dec.decodeH264(readBuf, uint32(readLen), true)
 	}
 	return nil
 }
@@ -342,8 +356,9 @@ func (dec *PsDecoder) decodePESHeader() (uint32, error) {
 }
 
 func (dec *PsDecoder) decodePES(pesType int) error {
-	//br := dec.br
-	pesStartPos := dec.getPos() - 4 // 4为startcode的长度
+	br := dec.br
+	offset, _ := br.Offset()
+	pesStartPos := offset - 4 // 4为startcode的长度
 	payloadLen, err := dec.decodePESHeader()
 	if err != nil {
 		return err
@@ -353,11 +368,10 @@ func (dec *PsDecoder) decodePES(pesType int) error {
 		return ErrCheckPayloadLen
 	}
 	payloadData := make([]byte, payloadLen)
-	/*
-		if _, err := io.ReadAtLeast(br, payloadData, int(payloadLen)); err != nil {
-			return err
-		}
-	*/
+	if _, err := dec.byteReader.Read(payloadData); err != nil {
+		log.Println(err)
+		return err
+	}
 	if pesType == VideoPES {
 		dec.decodeH264(payloadData, payloadLen, false)
 	} else {
@@ -461,17 +475,7 @@ func (dec *PsDecoder) Run() {
 	dec.showInfo()
 }
 
-func GetPosOfFile(f *os.File) {
-	// https://stackoverflow.com/questions/10901351/fgetpos-available-in-go-want-to-find-file-position
-
-}
-
 func New(param *param.ConsoleParam, ch chan *ui.TableItem) *PsDecoder {
-	psBuf, err := ioutil.ReadFile(param.PsFile)
-	if err != nil {
-		log.Printf("open file: %s error", param.PsFile)
-		return nil
-	}
 	f, err := os.Open(param.PsFile)
 	if err != nil {
 		log.Println(err)
@@ -483,14 +487,13 @@ func New(param *param.ConsoleParam, ch chan *ui.TableItem) *PsDecoder {
 		log.Println(err)
 		return nil
 	}
-	log.Println(param.PsFile, "file size:", len(psBuf))
 	br := bitreader.New(r, f, fileInfo.Size())
 	decoder := &PsDecoder{
-		br:       br,
-		fileSize: len(psBuf),
-		psBuf:    &psBuf,
-		param:    param,
-		ch:       ch,
+		br:         br,
+		param:      param,
+		ch:         ch,
+		byteReader: r,
+		f:          f,
 	}
 	return decoder
 }

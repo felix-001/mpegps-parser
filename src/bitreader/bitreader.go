@@ -72,5 +72,5 @@ func (br *BitReader) Offset() (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return offset, nil
+	return offset + int64(br.remain)/8, nil
 }
