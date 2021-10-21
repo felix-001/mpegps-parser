@@ -7,20 +7,20 @@ import (
 
 // 按byte读取
 type ByteReader interface {
+	io.Seeker
 	Read(p []byte) (n int, err error)
 }
 
 type BitReader struct {
-	size   int64
-	r      ByteReader
-	seeker io.Seeker
-	data   uint64
+	size int64
+	r    ByteReader
+	data uint64
 	// 剩余多少bit没有被读取
 	remain uint
 }
 
-func New(r ByteReader, seeker io.Seeker, size int64) *BitReader {
-	return &BitReader{r: r, size: size, seeker: seeker}
+func New(r ByteReader, size int64) *BitReader {
+	return &BitReader{r: r, size: size}
 }
 
 func (br *BitReader) Size() int64 {
@@ -68,7 +68,7 @@ func (br *BitReader) Read(n uint) (result uint64, err error) {
 }
 
 func (br *BitReader) Offset() (int64, error) {
-	offset, err := br.seeker.Seek(0, io.SeekCurrent)
+	offset, err := br.r.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return 0, err
 	}

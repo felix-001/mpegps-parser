@@ -2,11 +2,9 @@ package parser
 
 import (
 	"bitreader"
-	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"ntree"
 	"os"
@@ -58,7 +56,6 @@ type PsDecoder struct {
 	videoStreamType    uint32
 	audioStreamType    uint32
 	br                 *bitreader.BitReader
-	byteReader         io.Reader
 	f                  *os.File
 	pktCnt             int
 	errVideoFrameCnt   int
@@ -113,12 +110,10 @@ func (decoder *PsDecoder) sendBasic(startCode uint32, typ string, status string)
 
 func (decoder *PsDecoder) decodePkts() error {
 	br := decoder.br
-	offset, err := br.Offset()
-	if err != nil {
-		return err
-	}
 	// todo 这里offset不能这样判断
+	offset, _ := br.Offset()
 	for offset < br.Size() {
+		log.Println("offset", offset)
 		startCode, err := br.Read(32)
 		if err != nil {
 			log.Println(err)
@@ -127,14 +122,16 @@ func (decoder *PsDecoder) decodePkts() error {
 		decoder.pktCnt++
 		typ, _, err := decoder.decodePkt(uint32(startCode))
 		if err != nil {
-			log.Println(startCode, err)
+			log.Printf("0x%x %v", startCode, err)
 			return err
 		}
+		log.Println(typ)
 		status := "OK"
 		if err != nil {
 			status = "Error"
 		}
 		decoder.sendBasic(uint32(startCode), typ, status)
+		offset, _ = br.Offset()
 	}
 	return nil
 }
@@ -265,11 +262,13 @@ func (dec *PsDecoder) isPayloadLenValid(payloadLen uint32, pesType int, pesStart
 		log.Println("reach file end, quit")
 		return false
 	}
+	log.Println("pos", pos)
 	buf := make([]byte, 4, 4)
 	if _, err := dec.f.ReadAt(buf, pos); err != nil {
 		return false
 	}
 	packStartCode := binary.BigEndian.Uint32(buf)
+	log.Printf("startcode:%x", packStartCode)
 	if !dec.isStartCodeValid(packStartCode) {
 		log.Printf("check payload len error, len: %d pes start pos: %d(0x%x), pesType:%d", payloadLen, pesStartPos, pesStartPos, pesType)
 		return false
@@ -307,7 +306,7 @@ func (dec *PsDecoder) ReadInvalidBytes(payloadLen uint32, pesType int, pesStartP
 	log.Printf("Read len: %d, next pack pos:%d", readLen, pos)
 	readBuf := make([]byte, readLen)
 	// 由于payloadLen是错误的，所以下一个startcode和当前位置之间的字节需要丢弃
-	if _, err := dec.byteReader.Read(readBuf); err != nil {
+	if _, err := dec.f.Read(readBuf); err != nil {
 		log.Println(err)
 		return err
 	}
@@ -363,12 +362,13 @@ func (dec *PsDecoder) decodePES(pesType int) error {
 	if err != nil {
 		return err
 	}
+	log.Println("payloadLen", payloadLen)
 	if !dec.isPayloadLenValid(payloadLen, pesType, pesStartPos) {
 		dec.ReadInvalidBytes(payloadLen, pesType, pesStartPos)
 		return ErrCheckPayloadLen
 	}
 	payloadData := make([]byte, payloadLen)
-	if _, err := dec.byteReader.Read(payloadData); err != nil {
+	if _, err := dec.f.Read(payloadData); err != nil {
 		log.Println(err)
 		return err
 	}
@@ -407,16 +407,18 @@ func (decoder *PsDecoder) decodePsHeader() (*ntree.NTree, error) {
 		{5, "reserved"},
 		{3, "pack_stuffing_length"},
 	}
+	psHeaders := map[string]uint64{}
 	for _, field := range psHeaderFields {
-		_, err := decoder.br.Read(field.len)
+		val, err := decoder.br.Read(field.len)
 		if err != nil {
 			log.Printf("parse %s error", field.item)
 			return nil, err
 		}
-		//decoder.psHeader[field.item] = uint32(val)
+		psHeaders[field.item] = val
 	}
-	//pack_stuffing_length := decoder.psHeader["pack_stuffing_length"]
-	//decoder.br.Read(uint(pack_stuffing_length * 8))
+	pack_stuffing_length := psHeaders["pack_stuffing_length"]
+	log.Println("pack_stuffing_length", pack_stuffing_length)
+	decoder.br.Read(uint(pack_stuffing_length * 8))
 	return nil, nil
 }
 
@@ -472,7 +474,6 @@ func (decoder *PsDecoder) ParseDetail(offset int, typ string) (*ntree.NTree, err
 
 func (dec *PsDecoder) Run() {
 	go dec.decodePkts()
-	dec.showInfo()
 }
 
 func New(param *param.ConsoleParam, ch chan *ui.TableItem) *PsDecoder {
@@ -481,19 +482,17 @@ func New(param *param.ConsoleParam, ch chan *ui.TableItem) *PsDecoder {
 		log.Println(err)
 		return nil
 	}
-	r := bufio.NewReader(f)
 	fileInfo, err := os.Stat(param.PsFile)
 	if err != nil {
 		log.Println(err)
 		return nil
 	}
-	br := bitreader.New(r, f, fileInfo.Size())
+	br := bitreader.New(f, fileInfo.Size())
 	decoder := &PsDecoder{
-		br:         br,
-		param:      param,
-		ch:         ch,
-		byteReader: r,
-		f:          f,
+		br:    br,
+		param: param,
+		ch:    ch,
+		f:     f,
 	}
 	return decoder
 }
