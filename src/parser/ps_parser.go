@@ -119,6 +119,7 @@ func (decoder *PsDecoder) decodePkts() error {
 			log.Println(err)
 			return err
 		}
+		log.Printf("startcode:0x%x", startCode)
 		decoder.pktCnt++
 		typ, _, err := decoder.decodePkt(uint32(startCode))
 		if err != nil {
@@ -267,6 +268,8 @@ func (dec *PsDecoder) isPayloadLenValid(payloadLen uint32, pesType int, pesStart
 	if _, err := dec.f.ReadAt(buf, pos); err != nil {
 		return false
 	}
+	offset, _ = dec.br.Offset()
+	log.Println("after readat offset", offset)
 	packStartCode := binary.BigEndian.Uint32(buf)
 	log.Printf("startcode:%x", packStartCode)
 	if !dec.isStartCodeValid(packStartCode) {
@@ -362,6 +365,7 @@ func (dec *PsDecoder) decodePES(pesType int) error {
 	if err != nil {
 		return err
 	}
+	log.Println("decodePES read offset", offset)
 	log.Println("payloadLen", payloadLen)
 	if !dec.isPayloadLenValid(payloadLen, pesType, pesStartPos) {
 		dec.ReadInvalidBytes(payloadLen, pesType, pesStartPos)
@@ -372,6 +376,8 @@ func (dec *PsDecoder) decodePES(pesType int) error {
 		log.Println(err)
 		return err
 	}
+	offset, _ = br.Offset()
+	log.Println("after read offset", offset)
 	if pesType == VideoPES {
 		dec.decodeH264(payloadData, payloadLen, false)
 	} else {
@@ -391,6 +397,7 @@ func (dec *PsDecoder) decodeVideoPes() (*ntree.NTree, error) {
 }
 
 func (decoder *PsDecoder) decodePsHeader() (*ntree.NTree, error) {
+	log.Println("decodePsHeader")
 	psHeaderFields := []FieldInfo{
 		{2, "fixed"},
 		{3, "system_clock_refrence_base1"},
