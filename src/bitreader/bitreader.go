@@ -2,8 +2,13 @@ package bitreader
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"log"
+)
+
+var (
+	ErrRequestTooLong = errors.New("err request too long")
 )
 
 // 按byte读取
@@ -52,6 +57,10 @@ func (br *BitReader) update(n uint) {
 }
 
 func (br *BitReader) Read(n uint) (result uint64, err error) {
+	if n > 64 {
+		log.Println(ErrRequestTooLong, n)
+		return 0, ErrRequestTooLong
+	}
 	if n > br.remain {
 		log.Printf("befor fill %#v", br.data)
 		left := n - br.remain
@@ -63,7 +72,7 @@ func (br *BitReader) Read(n uint) (result uint64, err error) {
 		// 新数据读取的
 		log.Printf("after fill %#v", br.data)
 		result |= br.read(left)
-		log.Println("after fill remain", br.remain)
+		log.Println("after fill remain,", br.remain, "left", left, "n", n)
 		br.update(left)
 		log.Println("after update remain", br.remain)
 		return
@@ -82,13 +91,30 @@ func (br *BitReader) Offset() (int64, error) {
 	return offset - int64(br.remain)/8, nil
 }
 
+func (br *BitReader) readFromCache(b []byte, n int) (int, error) {
+	val := br.data >> (64 - n)
+	for i := 0; i < n; i++ {
+		b[i] = byte(val >> ((n - i) * 8))
+	}
+	log.Println("last remain", br.remain, "n:", uint(n*8))
+	br.update(uint(n * 8))
+	log.Println("remain:", br.remain)
+	return n, nil
+}
+
 func (br *BitReader) ReadBytes(b []byte) (n int, err error) {
-	binary.BigEndian.PutUint64(b, br.data>>(64-br.remain))
-	ret, err := br.r.Read(b[br.remain/8:])
+	left := int(br.remain) / 8
+	if len(b) <= left {
+		return br.readFromCache(b, len(b))
+	}
+	br.readFromCache(b, left)
+	ret, err := br.r.Read(b[left:])
 	if err != nil {
 		return 0, err
 	}
-	return ret + int(br.remain)/8, nil
+	n = ret + int(br.remain)/8
+	br.remain = 0
+	return
 }
 
 func (br *BitReader) ReadAt(b []byte, off int64) (int, error) {
