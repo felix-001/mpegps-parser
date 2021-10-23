@@ -62,7 +62,6 @@ func (br *BitReader) Read(n uint) (result uint64, err error) {
 		return 0, ErrRequestTooLong
 	}
 	if n > br.remain {
-		log.Printf("befor fill %#v", br.data)
 		left := n - br.remain
 		// 上次剩余的
 		result = br.read(br.remain) << left
@@ -70,14 +69,10 @@ func (br *BitReader) Read(n uint) (result uint64, err error) {
 			return
 		}
 		// 新数据读取的
-		log.Printf("after fill %#v", br.data)
 		result |= br.read(left)
-		log.Println("after fill remain,", br.remain, "left", left, "n", n)
 		br.update(left)
-		log.Println("after update remain", br.remain)
 		return
 	}
-	log.Printf("%#v remain:%d", br.data, br.remain)
 	result = br.read(n)
 	br.update(n)
 	return
@@ -96,9 +91,7 @@ func (br *BitReader) readFromCache(b []byte, n int) (int, error) {
 	for i := 0; i < n; i++ {
 		b[i] = byte(val >> ((n - i) * 8))
 	}
-	log.Println("last remain", br.remain, "n:", uint(n*8))
 	br.update(uint(n * 8))
-	log.Println("remain:", br.remain)
 	return n, nil
 }
 

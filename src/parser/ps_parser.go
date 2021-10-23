@@ -112,21 +112,13 @@ func (decoder *PsDecoder) decodePkts() error {
 	// todo 这里offset不能这样判断
 	offset, _ := br.Offset()
 	for offset < br.Size() {
-		fmt.Println("")
-		log.Println("offset", offset)
 		startCode, err := br.Read(32)
 		if err != nil {
 			log.Println(err)
 			return err
 		}
-		log.Printf("startcode:0x%x", startCode)
 		decoder.pktCnt++
 		typ, _, err := decoder.decodePkt(uint32(startCode))
-		if err != nil {
-			log.Printf("0x%x %v", startCode, err)
-			return err
-		}
-		log.Println(typ)
 		status := "OK"
 		if err != nil {
 			status = "Error"
@@ -262,22 +254,17 @@ func (dec *PsDecoder) isStartCodeValid(startCode uint32) bool {
 func (dec *PsDecoder) isPayloadLenValid(payloadLen uint32, pesType int, pesStartPos int64) bool {
 	br := dec.br
 	offset, _ := br.Offset()
-	log.Println("offset", offset)
-	log.Println("payloadLen:", payloadLen)
 	pos := offset + int64(payloadLen)
 	if pos >= br.Size() {
 		log.Println("reach file end, quit")
 		return false
 	}
-	log.Println("pos", pos)
 	buf := make([]byte, 4, 4)
 	if _, err := br.ReadAt(buf, pos); err != nil {
 		return false
 	}
 	offset, _ = br.Offset()
-	log.Println("after readat offset", offset)
 	packStartCode := binary.BigEndian.Uint32(buf)
-	log.Printf("startcode:%x", packStartCode)
 	if !dec.isStartCodeValid(packStartCode) {
 		log.Printf("check payload len error, len: %d pes start pos: %d(0x%x), pesType:%d", payloadLen, pesStartPos, pesStartPos, pesType)
 		return false
@@ -341,38 +328,27 @@ func (dec *PsDecoder) decodePESHeader() (uint32, error) {
 	br := dec.br
 	/* payload length */
 	payloadLen, err := br.Read(16)
-	log.Println("payloadLen", payloadLen)
 	if err != nil {
 		log.Println(err)
 		return 0, err
 	}
 
-	offset, _ := br.Offset()
-	log.Println("decodePESHeader:offset1", offset)
-
 	/* flags: pts_dts_flags ... */
 	br.Read(16) // 跳过各种flags,比如pts_dts_flags
 	payloadLen -= 2
 
-	offset, _ = br.Offset()
-	log.Println("decodePESHeader:offset2", offset)
 	/* pes header data length */
 	pesHeaderDataLen, err := br.Read(8)
 	if err != nil {
 		log.Println(err)
 		return 0, err
 	}
-	offset, _ = br.Offset()
-	log.Println("decodePESHeader:offset3", offset)
-	log.Println("pesHeaderDataLen", pesHeaderDataLen)
 	payloadLen--
 
 	//log.Println("pesHeaderDataLen", pesHeaderDataLen)
 	/* pes header data */
 	b := make([]byte, pesHeaderDataLen)
 	br.ReadBytes(b)
-	offset, _ = br.Offset()
-	log.Println("decodePESHeader:offset4", offset)
 	payloadLen -= pesHeaderDataLen
 	return uint32(payloadLen), nil
 }
@@ -381,14 +357,11 @@ func (dec *PsDecoder) decodePES(pesType int) error {
 	br := dec.br
 	offset, _ := br.Offset()
 	pesStartPos := offset - 4 // 4为startcode的长度
-	log.Println("decodePES enter offset", offset)
 	payloadLen, err := dec.decodePESHeader()
 	if err != nil {
 		return err
 	}
 	offset, _ = br.Offset()
-	log.Println("decodePES read offset", offset)
-	log.Println("payloadLen", payloadLen)
 	if !dec.isPayloadLenValid(payloadLen, pesType, pesStartPos) {
 		dec.ReadInvalidBytes(payloadLen, pesType, pesStartPos)
 		return ErrCheckPayloadLen
@@ -399,7 +372,6 @@ func (dec *PsDecoder) decodePES(pesType int) error {
 		return err
 	}
 	offset, _ = br.Offset()
-	log.Println("after read offset", offset)
 	if pesType == VideoPES {
 		dec.decodeH264(payloadData, payloadLen, false)
 	} else {
@@ -419,7 +391,6 @@ func (dec *PsDecoder) decodeVideoPes() (*ntree.NTree, error) {
 }
 
 func (decoder *PsDecoder) decodePsHeader() (*ntree.NTree, error) {
-	log.Println("decodePsHeader")
 	psHeaderFields := []FieldInfo{
 		{2, "fixed"},
 		{3, "system_clock_refrence_base1"},
@@ -446,7 +417,6 @@ func (decoder *PsDecoder) decodePsHeader() (*ntree.NTree, error) {
 		psHeaders[field.item] = val
 	}
 	pack_stuffing_length := psHeaders["pack_stuffing_length"]
-	log.Println("pack_stuffing_length", pack_stuffing_length)
 	decoder.br.Read(uint(pack_stuffing_length * 8))
 	return nil, nil
 }
