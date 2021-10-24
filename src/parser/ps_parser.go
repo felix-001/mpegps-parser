@@ -35,21 +35,38 @@ var (
 	ErrCheckInputFile    = errors.New("check input file error")
 )
 
-type FieldInfo struct {
-	len  uint
-	item string
-}
-
-type ItemInfo struct {
-	key   string
-	value string
-}
-
 type PktInfo struct {
 	Type   string
 	Status string
 	Offset int
 	Detail *ntree.NTree
+}
+
+type PackHeader struct {
+	system_clock_refrence_base1      uint64
+	system_clock_refrence_base2      uint64
+	system_clock_refrence_base3      uint64
+	system_clock_reference_extension uint64
+	program_mux_rate                 uint64
+	pack_stuffing_length             uint64
+}
+
+type SystemHeader struct {
+	header_length                uint64
+	rate_bound                   uint64
+	audio_bound                  uint64
+	fixed_flag                   uint64
+	CSPS_flag                    uint64
+	system_audio_lock_flag       uint64
+	system_video_lock_flag       uint64
+	video_bound                  uint64
+	packet_rate_restriction_flag uint64
+}
+
+type VideoPes struct {
+	NaluType         string
+	PayloadLen       uint64
+	PesHeaderDataLen uint64
 }
 
 type PsDecoder struct {
@@ -69,25 +86,28 @@ type PsDecoder struct {
 	audioFile          *os.File
 	param              *param.ConsoleParam
 	ch                 chan *ui.TableItem
+	videoPes           *VideoPes
+	packHeader         *PackHeader
+	systemHeader       *SystemHeader
 }
 
-func (decoder *PsDecoder) decodePkt(startCode uint32) (typ string, tree *ntree.NTree, err error) {
+func (decoder *PsDecoder) decodePkt(startCode uint32) (typ string, err error) {
 	switch startCode {
 	case StartCodePS:
 		typ = "pack header"
-		tree, err = decoder.decodePsHeader()
+		err = decoder.decodePsHeader()
 	case StartCodeSYS:
 		typ = "system header"
-		tree, err = decoder.decodeSystemHeader()
+		err = decoder.decodeSystemHeader()
 	case StartCodeMAP:
 		typ = "program stream map"
-		tree, err = decoder.decodeProgramStreamMap()
+		err = decoder.decodeProgramStreamMap()
 	case StartCodeVideo:
 		typ = "video pes"
-		tree, err = decoder.decodeVideoPes()
+		err = decoder.decodeVideoPes()
 	case StartCodeAudio:
 		typ = "audio pes"
-		tree, err = decoder.decodeAudioPes()
+		err = decoder.decodeAudioPes()
 	default:
 		err = ErrNotFoundStartCode
 	}
@@ -129,15 +149,22 @@ func (decoder *PsDecoder) decodePkts() error {
 	return nil
 }
 
-func (dec *PsDecoder) decodeSystemHeader() (*ntree.NTree, error) {
+func (dec *PsDecoder) decodeSystemHeader() error {
 	br := dec.br
-	syslens, err := br.Read(16)
-	if err != nil {
-		return nil, err
-	}
-	b := make([]byte, syslens)
-	br.ReadBytes(b)
-	return nil, nil
+	systemHeader := dec.systemHeader
+	systemHeader.header_length, _ = br.Read(16)
+	// marker bit
+	br.Read(1)
+	systemHeader.rate_bound, _ = br.Read(22)
+	systemHeader.fixed_flag, _ = br.Read(1)
+	systemHeader.CSPS_flag, _ = br.Read(1)
+	systemHeader.system_audio_lock_flag, _ = br.Read(1)
+	systemHeader.system_video_lock_flag, _ = br.Read(1)
+	// marker bit
+	br.Read(1)
+	systemHeader.video_bound, _ = br.Read(1)
+	systemHeader.packet_rate_restriction_flag, _ = br.Read(1)
+	return nil
 }
 
 func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
@@ -168,40 +195,40 @@ func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
 	return nil
 }
 
-func (dec *PsDecoder) decodeProgramStreamMap() (*ntree.NTree, error) {
+func (dec *PsDecoder) decodeProgramStreamMap() error {
 	br := dec.br
 	dec.psmCnt++
 
 	psmLen, err := br.Read(16)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	//drop psm version info
 	br.Read(16)
 	psmLen -= 2
 	programStreamInfoLen, err := br.Read(16)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	b := make([]byte, programStreamInfoLen)
 	br.ReadBytes(b)
 	psmLen -= (programStreamInfoLen + 2)
 	programStreamMapLen, err := br.Read(16)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	psmLen -= (2 + programStreamMapLen)
 
 	if err := dec.decodePsmNLoop(uint32(programStreamMapLen)); err != nil {
-		return nil, err
+		return err
 	}
 
 	// crc 32
 	if psmLen != 4 {
-		return nil, ErrFormatPack
+		return ErrFormatPack
 	}
 	br.Read(32)
-	return nil, nil
+	return nil
 }
 
 func (dec *PsDecoder) decodeH264(data []byte, len uint32, err bool) error {
@@ -315,22 +342,29 @@ func (dec *PsDecoder) ReadInvalidBytes(payloadLen uint32, pesType int, pesStartP
 	return nil
 }
 
-func (dec *PsDecoder) decodeAudioPes() (*ntree.NTree, error) {
+func (dec *PsDecoder) decodeAudioPes() error {
 	dec.totalAudioFrameCnt++
 	err := dec.decodePES(AudioPES)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return nil, nil
+	payloadLen := dec.videoPes.PayloadLen
+	payloadData := make([]byte, payloadLen)
+	if _, err := dec.br.ReadBytes(payloadData); err != nil {
+		log.Println(err)
+		return err
+	}
+	dec.saveAudioPkt(payloadData, uint32(payloadLen), false)
+	return nil
 }
 
-func (dec *PsDecoder) decodePESHeader() (uint32, error) {
+func (dec *PsDecoder) decodePESHeader() error {
 	br := dec.br
 	/* payload length */
 	payloadLen, err := br.Read(16)
 	if err != nil {
 		log.Println(err)
-		return 0, err
+		return err
 	}
 
 	/* flags: pts_dts_flags ... */
@@ -341,84 +375,80 @@ func (dec *PsDecoder) decodePESHeader() (uint32, error) {
 	pesHeaderDataLen, err := br.Read(8)
 	if err != nil {
 		log.Println(err)
-		return 0, err
+		return err
 	}
 	payloadLen--
 
-	//log.Println("pesHeaderDataLen", pesHeaderDataLen)
 	/* pes header data */
 	b := make([]byte, pesHeaderDataLen)
 	br.ReadBytes(b)
 	payloadLen -= pesHeaderDataLen
-	return uint32(payloadLen), nil
+
+	videoPes := dec.videoPes
+	videoPes.PayloadLen = payloadLen
+	videoPes.PesHeaderDataLen = pesHeaderDataLen
+
+	return nil
 }
 
 func (dec *PsDecoder) decodePES(pesType int) error {
-	br := dec.br
-	offset, _ := br.Offset()
+	offset, _ := dec.br.Offset()
 	pesStartPos := offset - 4 // 4为startcode的长度
-	payloadLen, err := dec.decodePESHeader()
+	err := dec.decodePESHeader()
 	if err != nil {
 		return err
 	}
-	offset, _ = br.Offset()
+	payloadLen := uint32(dec.videoPes.PayloadLen)
 	if !dec.isPayloadLenValid(payloadLen, pesType, pesStartPos) {
 		dec.ReadInvalidBytes(payloadLen, pesType, pesStartPos)
 		return ErrCheckPayloadLen
-	}
-	payloadData := make([]byte, payloadLen)
-	if _, err := br.ReadBytes(payloadData); err != nil {
-		log.Println(err)
-		return err
-	}
-	offset, _ = br.Offset()
-	if pesType == VideoPES {
-		dec.decodeH264(payloadData, payloadLen, false)
-	} else {
-		dec.saveAudioPkt(payloadData, payloadLen, false)
 	}
 
 	return nil
 }
 
-func (dec *PsDecoder) decodeVideoPes() (*ntree.NTree, error) {
+func (dec *PsDecoder) decodeVideoPes() error {
 	dec.totalVideoFrameCnt++
 	err := dec.decodePES(VideoPES)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return nil, nil
+	payloadLen := dec.videoPes.PayloadLen
+	payloadData := make([]byte, payloadLen)
+	if _, err := dec.br.ReadBytes(payloadData); err != nil {
+		log.Println(err)
+		return err
+	}
+	dec.decodeH264(payloadData, uint32(payloadLen), false)
+	return nil
 }
 
-func (decoder *PsDecoder) decodePsHeader() (*ntree.NTree, error) {
-	psHeaderFields := []FieldInfo{
-		{2, "fixed"},
-		{3, "system_clock_refrence_base1"},
-		{1, "marker_bit1"},
-		{15, "system_clock_refrence_base2"},
-		{1, "marker_bit2"},
-		{15, "system_clock_refrence_base3"},
-		{1, "marker_bit3"},
-		{9, "system_clock_reference_extension"},
-		{1, "marker_bit4"},
-		{22, "program_mux_rate"},
-		{1, "marker_bit5"},
-		{1, "marker_bit6"},
-		{5, "reserved"},
-		{3, "pack_stuffing_length"},
-	}
-	psHeaders := map[string]uint64{}
-	for _, field := range psHeaderFields {
-		val, err := decoder.br.Read(field.len)
-		if err != nil {
-			log.Printf("parse %s error", field.item)
-			return nil, err
-		}
-		psHeaders[field.item] = val
-	}
-	pack_stuffing_length := psHeaders["pack_stuffing_length"]
-	decoder.br.Read(uint(pack_stuffing_length * 8))
-	return nil, nil
+func (decoder *PsDecoder) decodePsHeader() (err error) {
+	br := decoder.br
+	packHeader := decoder.packHeader
+	// fixed
+	br.Read(2)
+	packHeader.system_clock_refrence_base1, _ = br.Read(3)
+	// marker bit
+	br.Read(1)
+	packHeader.system_clock_refrence_base2, _ = br.Read(3)
+	// marker bit
+	br.Read(1)
+	packHeader.system_clock_refrence_base3, _ = br.Read(3)
+	// marker bit
+	br.Read(1)
+	packHeader.system_clock_reference_extension, _ = br.Read(9)
+	// marker bit
+	br.Read(1)
+	packHeader.program_mux_rate, _ = br.Read(22)
+	// marker bit
+	br.Read(2)
+	// reserved
+	br.Read(5)
+	packHeader.pack_stuffing_length, _ = br.Read(3)
+	// skip stuffing bytes
+	br.Read(uint(packHeader.pack_stuffing_length * 8))
+	return nil
 }
 
 func (dec *PsDecoder) writeH264FrameToFile(frame []byte) error {
@@ -459,7 +489,7 @@ func (dec *PsDecoder) openAudioFile() error {
 	return nil
 }
 
-func (decoder *PsDecoder) ParseDetail(offset int, typ string) (*ntree.NTree, error) {
+func (decoder *PsDecoder) ParseDetail(offset int, typ string) error {
 	switch typ {
 	case "video pes":
 		return decoder.decodeVideoPes()
@@ -468,7 +498,7 @@ func (decoder *PsDecoder) ParseDetail(offset int, typ string) (*ntree.NTree, err
 	case "program stream map":
 		return decoder.decodeProgramStreamMap()
 	}
-	return nil, nil
+	return nil
 }
 
 func (dec *PsDecoder) Run() {
@@ -488,9 +518,12 @@ func New(param *param.ConsoleParam, ch chan *ui.TableItem) *PsDecoder {
 	}
 	br := bitreader.New(f, fileInfo.Size())
 	decoder := &PsDecoder{
-		br:    br,
-		param: param,
-		ch:    ch,
+		br:           br,
+		param:        param,
+		ch:           ch,
+		videoPes:     &VideoPes{},
+		packHeader:   &PackHeader{},
+		systemHeader: &SystemHeader{},
 	}
 	return decoder
 }
