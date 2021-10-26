@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"ntree"
 	"os"
 	"param"
 	"ui"
@@ -35,40 +34,6 @@ var (
 	ErrCheckInputFile    = errors.New("check input file error")
 )
 
-type PktInfo struct {
-	Type   string
-	Status string
-	Offset int
-	Detail *ntree.NTree
-}
-
-type PackHeader struct {
-	system_clock_refrence_base1      uint64
-	system_clock_refrence_base2      uint64
-	system_clock_refrence_base3      uint64
-	system_clock_reference_extension uint64
-	program_mux_rate                 uint64
-	pack_stuffing_length             uint64
-}
-
-type SystemHeader struct {
-	header_length                uint64
-	rate_bound                   uint64
-	audio_bound                  uint64
-	fixed_flag                   uint64
-	CSPS_flag                    uint64
-	system_audio_lock_flag       uint64
-	system_video_lock_flag       uint64
-	video_bound                  uint64
-	packet_rate_restriction_flag uint64
-}
-
-type VideoPes struct {
-	NaluType         string
-	PayloadLen       uint64
-	PesHeaderDataLen uint64
-}
-
 type PsDecoder struct {
 	videoStreamType    uint32
 	audioStreamType    uint32
@@ -86,9 +51,6 @@ type PsDecoder struct {
 	audioFile          *os.File
 	param              *param.ConsoleParam
 	ch                 chan *ui.TableItem
-	videoPes           *VideoPes
-	packHeader         *PackHeader
-	systemHeader       *SystemHeader
 }
 
 func (decoder *PsDecoder) decodePkt(startCode uint32) (m map[string]interface{}, err error) {
@@ -98,7 +60,7 @@ func (decoder *PsDecoder) decodePkt(startCode uint32) (m map[string]interface{},
 	case StartCodeSYS:
 		m, err = decoder.decodeSystemHeader()
 	case StartCodeMAP:
-		err = decoder.decodeProgramStreamMap()
+		m, err = decoder.decodeProgramStreamMap()
 	case StartCodeVideo:
 		err = decoder.decodeVideoPes()
 	case StartCodeAudio:
@@ -180,34 +142,6 @@ func (dec *PsDecoder) decodeSystemHeader() (map[string]interface{}, error) {
 	}
 	m["nloop"] = infos
 	return m, nil
-}
-
-func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
-	br := decoder.br
-	for programStreamMapLen > 0 {
-		streamType, err := br.Read(8)
-		if err != nil {
-			return err
-		}
-		elementaryStreamID, err := br.Read(8)
-		if err != nil {
-			return err
-		}
-		if elementaryStreamID >= 0xe0 && elementaryStreamID <= 0xef {
-			decoder.videoStreamType = uint32(streamType)
-		}
-		if elementaryStreamID >= 0xc0 && elementaryStreamID <= 0xdf {
-			decoder.audioStreamType = uint32(streamType)
-		}
-		elementaryStreamInfoLength, err := br.Read(16)
-		if err != nil {
-			return err
-		}
-		b := make([]byte, elementaryStreamInfoLength)
-		br.ReadBytes(b)
-		programStreamMapLen -= (4 + uint32(elementaryStreamInfoLength))
-	}
-	return nil
 }
 
 func (dec *PsDecoder) decodeProgramStreamMap() (map[string]interface{}, error) {
@@ -374,6 +308,23 @@ func (dec *PsDecoder) decodeAudioPes() error {
 }
 
 func (dec *PsDecoder) decodePESHeader() error {
+	m := map[string]interface{}{
+		"PES_packet_length":         16,
+		"fixed":                     2,
+		"PES_scrambling_control":    1,
+		"PES_priority":              1,
+		"data_alignment_indicator":  1,
+		"copyright":                 1,
+		"original_or_copy":          1,
+		"PTS_DTS_flags":             2,
+		"ESCR_flag":                 1,
+		"ES_rate_flag":              1,
+		"DSM_trick_mode_flag":       1,
+		"additional_copy_info_flag": 1,
+		"PES_CRC_flag":              1,
+		"PES_extension_flag":        1,
+		"PES_header_data_length":    8,
+	}
 	br := dec.br
 	/* payload length */
 	payloadLen, err := br.Read(16)
@@ -545,12 +496,9 @@ func New(param *param.ConsoleParam, ch chan *ui.TableItem) *PsDecoder {
 	}
 	br := bitreader.New(f, fileInfo.Size())
 	decoder := &PsDecoder{
-		br:           br,
-		param:        param,
-		ch:           ch,
-		videoPes:     &VideoPes{},
-		packHeader:   &PackHeader{},
-		systemHeader: &SystemHeader{},
+		br:    br,
+		param: param,
+		ch:    ch,
 	}
 	return decoder
 }
