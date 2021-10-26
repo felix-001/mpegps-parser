@@ -46,7 +46,7 @@ func (br *BitReader) fill() error {
 }
 
 func (br *BitReader) read(n uint) uint64 {
-	mask := ^uint64(0) << n
+	mask := ^uint64(0) << (64 - n)
 	result := (br.data & mask) >> (64 - n)
 	return result
 }
@@ -54,6 +54,30 @@ func (br *BitReader) read(n uint) uint64 {
 func (br *BitReader) update(n uint) {
 	br.data <<= n
 	br.remain -= n
+}
+
+func (br *BitReader) Peek(n uint) (result uint64, err error) {
+	if n > 64 {
+		log.Println(ErrRequestTooLong, n)
+		return 0, ErrRequestTooLong
+	}
+	if n > br.remain {
+		left := n - br.remain
+		// 上次剩余的
+		result = br.read(br.remain) << left
+		// 新数据读取的
+		buf := make([]byte, 8)
+		offset, _ := br.Offset()
+		if _, err := br.r.ReadAt(buf, offset); err != nil {
+			return 0, err
+		}
+		data := binary.BigEndian.Uint64(buf)
+		mask := ^uint64(0) << (64 - left)
+		result |= (data & mask) >> (64 - left)
+		return
+	}
+	result = br.read(n)
+	return
 }
 
 func (br *BitReader) Read(n uint) (result uint64, err error) {

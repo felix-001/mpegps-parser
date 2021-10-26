@@ -91,22 +91,17 @@ type PsDecoder struct {
 	systemHeader       *SystemHeader
 }
 
-func (decoder *PsDecoder) decodePkt(startCode uint32) (typ string, err error) {
+func (decoder *PsDecoder) decodePkt(startCode uint32) (m map[string]interface{}, err error) {
 	switch startCode {
 	case StartCodePS:
-		typ = "pack header"
-		err = decoder.decodePsHeader()
+		m, err = decoder.decodePsHeader()
 	case StartCodeSYS:
-		typ = "system header"
-		err = decoder.decodeSystemHeader()
+		m, err = decoder.decodeSystemHeader()
 	case StartCodeMAP:
-		typ = "program stream map"
 		err = decoder.decodeProgramStreamMap()
 	case StartCodeVideo:
-		typ = "video pes"
 		err = decoder.decodeVideoPes()
 	case StartCodeAudio:
-		typ = "audio pes"
 		err = decoder.decodeAudioPes()
 	default:
 		err = ErrNotFoundStartCode
@@ -114,14 +109,14 @@ func (decoder *PsDecoder) decodePkt(startCode uint32) (typ string, err error) {
 	return
 }
 
-func (decoder *PsDecoder) sendBasic(startCode uint32, typ string, status string) {
+func (decoder *PsDecoder) sendBasic(startCode uint32, m map[string]interface{}, status string) {
 	if startCode == StartCodePS {
 		return
 	}
 	offset, _ := decoder.br.Offset()
 	item := &ui.TableItem{
 		Offset:  int64(offset),
-		PktType: typ,
+		PktType: m["pkt_type"].(string),
 		Status:  status,
 	}
 	decoder.ch <- item
@@ -138,33 +133,53 @@ func (decoder *PsDecoder) decodePkts() error {
 			return err
 		}
 		decoder.pktCnt++
-		typ, _, err := decoder.decodePkt(uint32(startCode))
+		m, err := decoder.decodePkt(uint32(startCode))
 		status := "OK"
 		if err != nil {
 			status = "Error"
 		}
-		decoder.sendBasic(uint32(startCode), typ, status)
+		decoder.sendBasic(uint32(startCode), m, status)
 		offset, _ = br.Offset()
 	}
 	return nil
 }
 
-func (dec *PsDecoder) decodeSystemHeader() error {
-	br := dec.br
-	systemHeader := dec.systemHeader
-	systemHeader.header_length, _ = br.Read(16)
-	// marker bit
-	br.Read(1)
-	systemHeader.rate_bound, _ = br.Read(22)
-	systemHeader.fixed_flag, _ = br.Read(1)
-	systemHeader.CSPS_flag, _ = br.Read(1)
-	systemHeader.system_audio_lock_flag, _ = br.Read(1)
-	systemHeader.system_video_lock_flag, _ = br.Read(1)
-	// marker bit
-	br.Read(1)
-	systemHeader.video_bound, _ = br.Read(1)
-	systemHeader.packet_rate_restriction_flag, _ = br.Read(1)
-	return nil
+func (dec *PsDecoder) decodeSystemHeader() (map[string]interface{}, error) {
+	m := map[string]interface{}{
+		"pkt_type":                     "system header",
+		"header_length":                16,
+		"marker_bit1":                  1,
+		"rate_bound":                   22,
+		"fixed_flag":                   1,
+		"CSPS_flag":                    1,
+		"system_audio_lock_flag":       1,
+		"system_video_lock_flag":       1,
+		"marker_bit2":                  1,
+		"video_bound":                  5,
+		"packet_rate_restriction_flag": 1,
+		"reserved_bits":                7,
+	}
+	dec.decode(m)
+	nextbits, err := dec.br.Peek(1)
+	if err != nil {
+		return nil, err
+	}
+	infos := []map[string]interface{}{}
+	for nextbits == 1 {
+		info := map[string]interface{}{
+			"fixed":                    2,
+			"P-STD_buffer_bound_scale": 1,
+			"P-STD_buffer_size_bound":  13,
+		}
+		dec.decode(info)
+		infos = append(infos, info)
+		nextbits, err = dec.br.Peek(1)
+		if err != nil {
+			return nil, err
+		}
+	}
+	m["nloop"] = infos
+	return m, nil
 }
 
 func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
@@ -195,40 +210,40 @@ func (decoder *PsDecoder) decodePsmNLoop(programStreamMapLen uint32) error {
 	return nil
 }
 
-func (dec *PsDecoder) decodeProgramStreamMap() error {
-	br := dec.br
-	dec.psmCnt++
-
-	psmLen, err := br.Read(16)
-	if err != nil {
-		return err
+func (dec *PsDecoder) decodeProgramStreamMap() (map[string]interface{}, error) {
+	m := map[string]interface{}{
+		"pkt_type":                   "program stream map",
+		"map_stream_id":              8,
+		"program_stream_map_length":  16,
+		"current_next_indicator":     1,
+		"reserved1":                  2,
+		"program_stream_map_version": 5,
+		"reserved2":                  7,
+		"marker_bit":                 1,
+		"program_stream_info_length": 16,
 	}
-	//drop psm version info
-	br.Read(16)
-	psmLen -= 2
-	programStreamInfoLen, err := br.Read(16)
-	if err != nil {
-		return err
+	dec.decode(m)
+	buf := make([]byte, m["program_stream_info_length"].(int))
+	dec.br.ReadBytes(buf)
+	elementary_stream_map_length, _ := dec.br.Read(16)
+	m["elementary_stream_map_length"] = elementary_stream_map_length
+	elementary_stream_maps := []map[string]interface{}{}
+	for elementary_stream_map_length > 0 {
+		elementary_stream_map := map[string]interface{}{
+			"stream_type":                   8,
+			"elementary_stream_id":          8,
+			"elementary_stream_info_length": 16,
+		}
+		dec.decode(elementary_stream_map)
+		elementary_stream_maps = append(elementary_stream_maps, elementary_stream_map)
+		elementary_stream_info_length := elementary_stream_map["elementary_stream_info_length"].(uint64)
+		buf := make([]byte, elementary_stream_info_length)
+		dec.br.ReadBytes(buf)
+		elementary_stream_map_length -= 4 + elementary_stream_info_length
 	}
-	b := make([]byte, programStreamInfoLen)
-	br.ReadBytes(b)
-	psmLen -= (programStreamInfoLen + 2)
-	programStreamMapLen, err := br.Read(16)
-	if err != nil {
-		return err
-	}
-	psmLen -= (2 + programStreamMapLen)
-
-	if err := dec.decodePsmNLoop(uint32(programStreamMapLen)); err != nil {
-		return err
-	}
-
-	// crc 32
-	if psmLen != 4 {
-		return ErrFormatPack
-	}
-	br.Read(32)
-	return nil
+	m["elementary_stream_maps"] = elementary_stream_maps
+	m["CRC_32"], _ = dec.br.Read(32)
+	return m, nil
 }
 
 func (dec *PsDecoder) decodeH264(data []byte, len uint32, err bool) error {
@@ -423,32 +438,44 @@ func (dec *PsDecoder) decodeVideoPes() error {
 	return nil
 }
 
-func (decoder *PsDecoder) decodePsHeader() (err error) {
-	br := decoder.br
-	packHeader := decoder.packHeader
-	// fixed
-	br.Read(2)
-	packHeader.system_clock_refrence_base1, _ = br.Read(3)
-	// marker bit
-	br.Read(1)
-	packHeader.system_clock_refrence_base2, _ = br.Read(3)
-	// marker bit
-	br.Read(1)
-	packHeader.system_clock_refrence_base3, _ = br.Read(3)
-	// marker bit
-	br.Read(1)
-	packHeader.system_clock_reference_extension, _ = br.Read(9)
-	// marker bit
-	br.Read(1)
-	packHeader.program_mux_rate, _ = br.Read(22)
-	// marker bit
-	br.Read(2)
-	// reserved
-	br.Read(5)
-	packHeader.pack_stuffing_length, _ = br.Read(3)
-	// skip stuffing bytes
-	br.Read(uint(packHeader.pack_stuffing_length * 8))
+func (decoder *PsDecoder) decode(m map[string]interface{}) error {
+	for k, v := range m {
+		_v, ok := v.(uint64)
+		if !ok {
+			continue
+		}
+		ret, err := decoder.br.Read(uint(_v))
+		if err != nil {
+			log.Println("read", k, v, "err")
+			return err
+		}
+		m[k] = ret
+	}
 	return nil
+}
+
+func (decoder *PsDecoder) decodePsHeader() (map[string]interface{}, error) {
+	m := map[string]interface{}{
+		"pkt_type":                         "pack header",
+		"fixed":                            2,
+		"system_clock_refrence_base1":      3,
+		"marker_bit1":                      1,
+		"system_clock_refrence_base2":      15,
+		"marker_bit2":                      1,
+		"system_clock_refrence_base3":      15,
+		"marker_bit3":                      1,
+		"system_clock_reference_extension": 9,
+		"marker_bit4":                      1,
+		"program_mux_rate":                 22,
+		"marker_bit5":                      1,
+		"marker_bit6":                      1,
+		"resvrved":                         5,
+		"pack_stuffing_length":             3,
+	}
+	decoder.decode(m)
+	// skip stuffing bytes
+	decoder.br.Read(uint(m["pack_stuffing_length"].(uint64) * 8))
+	return m, nil
 }
 
 func (dec *PsDecoder) writeH264FrameToFile(frame []byte) error {
