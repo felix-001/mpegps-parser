@@ -20,6 +20,14 @@ const (
 )
 
 const (
+	fast_forward = 0
+	slow_motion  = 1
+	freeze_frame = 2
+	fast_reverse = 3
+	slow_reverse = 4
+)
+
+const (
 	VideoPES = 0x01
 	AudioPES = 0x02
 )
@@ -307,7 +315,120 @@ func (dec *PsDecoder) decodeAudioPes() error {
 	return nil
 }
 
-func (dec *PsDecoder) decodePESHeader() error {
+func (dec *PsDecoder) decodePTSDTS(m map[string]interface{}) error {
+	PTS_DTS_flags := m["PTS_DTS_flags"].(uint64)
+	if PTS_DTS_flags == 2 {
+		ptsInfo := map[string]interface{}{
+			"fixed":       4,
+			"PTS1":        3,
+			"marker_bit1": 1,
+			"PTS2":        15,
+			"marker_bit2": 1,
+			"PTS3":        15,
+			"marker_bit3": 1,
+		}
+		dec.decode(ptsInfo)
+		m["PTS"] = ptsInfo
+	}
+	if PTS_DTS_flags == 3 {
+		ptsdtsInfo := map[string]interface{}{
+			"fixed1":      4,
+			"PTS1":        3,
+			"marker_bit1": 1,
+			"PTS2":        15,
+			"marker_bit2": 1,
+			"PTS3":        15,
+			"marker_bit3": 1,
+			"fixed2":      4,
+			"DTS1":        3,
+			"marker_bit4": 1,
+			"DTS2":        15,
+			"marker_bit5": 1,
+			"DTS3":        15,
+			"marker_bit6": 1,
+		}
+		dec.decode(ptsdtsInfo)
+		m["PTSDTS"] = ptsdtsInfo
+	}
+	return nil
+}
+
+func (dec *PsDecoder) decodeESCR(m map[string]interface{}) error {
+	if m["ESCR_flag"].(uint64) != 1 {
+		return nil
+	}
+	escrInfo := map[string]interface{}{
+		"reserved":       1,
+		"ESCR_base1":     3,
+		"marker_bit1":    1,
+		"ESCR_base2":     15,
+		"marker_bit2":    1,
+		"ESCR_base3":     15,
+		"marker_bit3":    1,
+		"ESCR_extension": 9,
+		"marker_bit4":    1,
+	}
+	dec.decode(escrInfo)
+	m["ESCR"] = escrInfo
+	return nil
+}
+
+func (dec *PsDecoder) decodeESRate(m map[string]interface{}) error {
+	if m["ES_rate_flag"].(uint64) != 1 {
+		return nil
+	}
+	esRateInfo := map[string]interface{}{
+		"marker_bit1": 1,
+		"ES_rate":     22,
+		"marker_bit2": 1,
+	}
+	dec.decode(esRateInfo)
+	m["ES_rate"] = esRateInfo
+	return nil
+}
+
+func (dec *PsDecoder) decodeDSMTrickMode(m map[string]interface{}) error {
+	if m["(DSM_trick_mode_flag"].(uint64) != 1 {
+		return nil
+	}
+	trick_mode_control, _ := dec.br.Read(3)
+	m["trick_mode_control"] = trick_mode_control
+	switch trick_mode_control {
+	case fast_forward:
+	case fast_reverse:
+		info := map[string]interface{}{
+			"field_id":             2,
+			"intra_slice_refresh":  1,
+			"frequency_truncation": 2,
+		}
+		dec.decode(info)
+		m["trick_mode"] = info
+	case slow_motion:
+	case slow_reverse:
+		m["rep_cntrl"], _ = dec.br.Read(5)
+	default:
+		dec.br.Read(5)
+
+	}
+	return nil
+}
+
+func (dec *PsDecoder) decodeAdditionalCopyInfo(m map[string]interface{}) error {
+	if m["additional_copy_info_flag"].(uint64) == 1 {
+		dec.br.Read(1)
+		m["additional_copy_info"], _ = dec.br.Read(7)
+	}
+	return nil
+}
+
+func (dec *PsDecoder) decodeCRC(m map[string]interface{}) error {
+	if m["PES_CRC_flag"].(uint64) == 1 {
+		m["previous_PES_packet_CRC"], _ = dec.br.Read(16)
+	}
+	return nil
+}
+
+func (dec *PsDecoder) decodePesBase() (map[string]interface{}, error) {
 	m := map[string]interface{}{
 		"PES_packet_length":         16,
 		"fixed":                     2,
@@ -325,6 +446,66 @@ func (dec *PsDecoder) decodePESHeader() error {
 		"PES_extension_flag":        1,
 		"PES_header_data_length":    8,
 	}
+	dec.decode(m)
+	return m, nil
+}
+
+func (dec *PsDecoder) decodePesExtension(m map[string]interface{}) error {
+	pesExt := map[string]interface{}{
+		"PES_private_data_flag":                1,
+		"pack_header_field_flag":               1,
+		"program_packet_sequence_counter_flag": 1,
+		"P-STD_buffer_flag":                    1,
+		"reserved":                             3,
+		"PES_extension_flag_2":                 1,
+	}
+	dec.decode(pesExt)
+	m["PES_xtension"] = pesExt
+	if m["PES_private_data_flag"].(uint64) == 1 {
+		b := make([]byte, 16)
+		dec.br.ReadBytes(b)
+	}
+	if m["pack_header_field_flag"].(uint64) == 1 {
+		pack_field_length, _ := dec.br.Read(8)
+		m["pack_field_length"] = pack_field_length
+		b := make([]byte, pack_field_length)
+		dec.br.ReadBytes(b)
+	}
+	if m["program_packet_sequence_counter_flag"].(uint64) == 1 {
+		sequenceCount := map[string]interface{}{
+			"marker_bit1":                     1,
+			"program_packet_sequence_counter": 7,
+			"marker_bit2":                     1,
+			"MPEG1_MPEG2_identifier":          1,
+			"original_stuff_length":           6,
+		}
+		dec.decode(sequenceCount)
+		m["sequence_counter"] = sequenceCount
+	}
+	if m[" P-STD_buffer_flag"].(uint64) == 1 {
+		dec.br.Read(2)
+		m["P-STD_buffer_scale"], _ = dec.br.Read(1)
+		m["P-STD_buffer_size"], _ = dec.br.Read(13)
+	}
+	if m["PES_extension_flag_2"].(uint64) == 1 {
+		dec.br.Read(1)
+		PES_extension_field_length, _ := dec.br.Read(7)
+		m["PES_extension_field_length"] = PES_extension_field_length
+		b := make([]byte, PES_extension_field_length)
+		dec.br.ReadBytes(b)
+	}
+	return nil
+}
+
+func (dec *PsDecoder) decodePESHeader() error {
+	m, _ := dec.decodePesBase()
+	dec.decodePTSDTS(m)
+	dec.decodeESCR(m)
+	dec.decodeESRate(m)
+	dec.decodeDSMTrickMode(m)
+	dec.decodeAdditionalCopyInfo(m)
+	dec.decodeCRC(m)
+
 	br := dec.br
 	/* payload length */
 	payloadLen, err := br.Read(16)
