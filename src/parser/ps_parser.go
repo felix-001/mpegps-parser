@@ -42,6 +42,171 @@ var (
 	ErrCheckInputFile    = errors.New("check input file error")
 )
 
+var (
+	packHeader = M{
+		"pkt_type":                         "pack header",
+		"fixed":                            2,
+		"system_clock_refrence_base1":      3,
+		"marker_bit1":                      1,
+		"system_clock_refrence_base2":      15,
+		"marker_bit2":                      1,
+		"system_clock_refrence_base3":      15,
+		"marker_bit3":                      1,
+		"system_clock_reference_extension": 9,
+		"marker_bit4":                      1,
+		"program_mux_rate":                 22,
+		"marker_bit5":                      1,
+		"marker_bit6":                      1,
+		"resvrved":                         5,
+		"pack_stuffing_length":             3,
+	}
+	systemHeader = M{
+		"pkt_type":                     "system header",
+		"header_length":                16,
+		"marker_bit1":                  1,
+		"rate_bound":                   22,
+		"fixed_flag":                   1,
+		"CSPS_flag":                    1,
+		"system_audio_lock_flag":       1,
+		"system_video_lock_flag":       1,
+		"marker_bit2":                  1,
+		"video_bound":                  5,
+		"packet_rate_restriction_flag": 1,
+		"reserved_bits":                7,
+	}
+	systemHeaderDetail = M{
+		"stream_id":                8,
+		"fixed":                    2,
+		"P-STD_buffer_bound_scale": 1,
+		"P-STD_buffer_size_bound":  13,
+	}
+	programStreamMap = M{
+		"pkt_type":                   "program stream map",
+		"map_stream_id":              8,
+		"program_stream_map_length":  16,
+		"current_next_indicator":     1,
+		"reserved1":                  2,
+		"program_stream_map_version": 5,
+		"reserved2":                  7,
+		"marker_bit":                 1,
+		"program_stream_info_length": 16,
+	}
+	elementaryStreamMap = M{
+		"stream_type":                   8,
+		"elementary_stream_id":          8,
+		"elementary_stream_info_length": 16,
+	}
+	ptsInfo = M{
+		"fixed":       4,
+		"PTS1":        3,
+		"marker_bit1": 1,
+		"PTS2":        15,
+		"marker_bit2": 1,
+		"PTS3":        15,
+		"marker_bit3": 1,
+	}
+	ptsdtsInfo = M{
+		"fixed1":      4,
+		"PTS1":        3,
+		"marker_bit1": 1,
+		"PTS2":        15,
+		"marker_bit2": 1,
+		"PTS3":        15,
+		"marker_bit3": 1,
+		"fixed2":      4,
+		"DTS1":        3,
+		"marker_bit4": 1,
+		"DTS2":        15,
+		"marker_bit5": 1,
+		"DTS3":        15,
+		"marker_bit6": 1,
+	}
+	escrInfo = M{
+		"reserved":       1,
+		"ESCR_base1":     3,
+		"marker_bit1":    1,
+		"ESCR_base2":     15,
+		"marker_bit2":    1,
+		"ESCR_base3":     15,
+		"marker_bit3":    1,
+		"ESCR_extension": 9,
+		"marker_bit4":    1,
+	}
+	esRateInfo = M{
+		"marker_bit1": 1,
+		"ES_rate":     22,
+		"marker_bit2": 1,
+	}
+	pes = M{
+		"PES_packet_length":         16,
+		"fixed":                     2,
+		"PES_scrambling_control":    1,
+		"PES_priority":              1,
+		"data_alignment_indicator":  1,
+		"copyright":                 1,
+		"original_or_copy":          1,
+		"PTS_DTS_flags":             2,
+		"ESCR_flag":                 1,
+		"ES_rate_flag":              1,
+		"DSM_trick_mode_flag":       1,
+		"additional_copy_info_flag": 1,
+		"PES_CRC_flag":              1,
+		"PES_extension_flag":        1,
+		"PES_header_data_length":    8,
+	}
+	pesExt = M{
+		"PES_private_data_flag":                1,
+		"pack_header_field_flag":               1,
+		"program_packet_sequence_counter_flag": 1,
+		"P-STD_buffer_flag":                    1,
+		"reserved":                             3,
+		"PES_extension_flag_2":                 1,
+	}
+)
+
+type M map[string]interface{}
+
+type DataManager struct {
+	m  M
+	br *bitreader.BitReader
+}
+
+func NewDataManager(br *bitreader.BitReader) *DataManager {
+	return &DataManager{br: br}
+}
+
+func (dm *DataManager) _decode(input, output M) error {
+	for k, v := range input {
+		_v, ok := v.(uint64)
+		if !ok {
+			continue
+		}
+		ret, err := dm.br.Read(uint(_v))
+		if err != nil {
+			log.Println("read", k, v, "err")
+			return err
+		}
+		output[k] = ret
+	}
+	return nil
+}
+
+func (dm *DataManager) decode(input M) error {
+	return dm._decode(input, dm.m)
+}
+
+func (dm *DataManager) decodeChild(m M) error {
+	return dm._decode(m, m)
+}
+
+func (dm *DataManager) set(key string, val interface{}) {
+	dm.m[key] = val
+}
+
+func (dm *DataManager) get(key string) uint64 {
+	return dm.m[key].(uint64)
+}
+
 type PsDecoder struct {
 	videoStreamType    uint32
 	audioStreamType    uint32
@@ -114,78 +279,45 @@ func (decoder *PsDecoder) decodePkts() error {
 	return nil
 }
 
-func (dec *PsDecoder) decodeSystemHeader() (map[string]interface{}, error) {
-	m := map[string]interface{}{
-		"pkt_type":                     "system header",
-		"header_length":                16,
-		"marker_bit1":                  1,
-		"rate_bound":                   22,
-		"fixed_flag":                   1,
-		"CSPS_flag":                    1,
-		"system_audio_lock_flag":       1,
-		"system_video_lock_flag":       1,
-		"marker_bit2":                  1,
-		"video_bound":                  5,
-		"packet_rate_restriction_flag": 1,
-		"reserved_bits":                7,
-	}
-	dec.decode(m)
+func (dec *PsDecoder) decodeSystemHeader() (M, error) {
+	dm := NewDataManager(dec.br)
+	dm.decode(systemHeader)
 	nextbits, err := dec.br.Peek(1)
 	if err != nil {
 		return nil, err
 	}
-	infos := []map[string]interface{}{}
 	for nextbits == 1 {
-		info := map[string]interface{}{
-			"fixed":                    2,
-			"P-STD_buffer_bound_scale": 1,
-			"P-STD_buffer_size_bound":  13,
-		}
-		dec.decode(info)
-		infos = append(infos, info)
-		nextbits, err = dec.br.Peek(1)
-		if err != nil {
+		dm.decode(systemHeaderDetail)
+		if nextbits, err = dec.br.Peek(1); err != nil {
 			return nil, err
 		}
 	}
-	m["nloop"] = infos
-	return m, nil
+	return dm.m, nil
+}
+
+func (dm *DataManager) skipBytes(size uint64) {
+	buf := make([]byte, size)
+	dm.br.ReadBytes(buf)
 }
 
 func (dec *PsDecoder) decodeProgramStreamMap() (map[string]interface{}, error) {
-	m := map[string]interface{}{
-		"pkt_type":                   "program stream map",
-		"map_stream_id":              8,
-		"program_stream_map_length":  16,
-		"current_next_indicator":     1,
-		"reserved1":                  2,
-		"program_stream_map_version": 5,
-		"reserved2":                  7,
-		"marker_bit":                 1,
-		"program_stream_info_length": 16,
-	}
-	dec.decode(m)
-	buf := make([]byte, m["program_stream_info_length"].(int))
-	dec.br.ReadBytes(buf)
+	dm := NewDataManager(dec.br)
+	dm.decode(programStreamMap)
+	dm.skipBytes(dm.get("program_stream_info_length"))
 	elementary_stream_map_length, _ := dec.br.Read(16)
-	m["elementary_stream_map_length"] = elementary_stream_map_length
+	dm.set("elementary_stream_map_length", elementary_stream_map_length)
 	elementary_stream_maps := []map[string]interface{}{}
 	for elementary_stream_map_length > 0 {
-		elementary_stream_map := map[string]interface{}{
-			"stream_type":                   8,
-			"elementary_stream_id":          8,
-			"elementary_stream_info_length": 16,
-		}
-		dec.decode(elementary_stream_map)
-		elementary_stream_maps = append(elementary_stream_maps, elementary_stream_map)
-		elementary_stream_info_length := elementary_stream_map["elementary_stream_info_length"].(uint64)
-		buf := make([]byte, elementary_stream_info_length)
-		dec.br.ReadBytes(buf)
+		dm.decodeChild(elementaryStreamMap)
+		elementary_stream_maps = append(elementary_stream_maps, elementaryStreamMap)
+		elementary_stream_info_length := dm.get("elementary_stream_info_length")
+		dm.skipBytes(elementary_stream_info_length)
 		elementary_stream_map_length -= 4 + elementary_stream_info_length
 	}
-	m["elementary_stream_maps"] = elementary_stream_maps
-	m["CRC_32"], _ = dec.br.Read(32)
-	return m, nil
+	dm.set("elementary_stream_map", elementary_stream_maps)
+	CRC_32, _ := dec.br.Read(32)
+	dm.set("CRC_32", CRC_32)
+	return dm.m, nil
 }
 
 func (dec *PsDecoder) decodeH264(data []byte, len uint32, err bool) error {
@@ -315,61 +447,16 @@ func (dec *PsDecoder) decodeAudioPes() error {
 	return nil
 }
 
-func (dec *PsDecoder) decodePTSDTS(m map[string]interface{}) error {
-	PTS_DTS_flags := m["PTS_DTS_flags"].(uint64)
-	if PTS_DTS_flags == 2 {
-		ptsInfo := map[string]interface{}{
-			"fixed":       4,
-			"PTS1":        3,
-			"marker_bit1": 1,
-			"PTS2":        15,
-			"marker_bit2": 1,
-			"PTS3":        15,
-			"marker_bit3": 1,
-		}
-		dec.decode(ptsInfo)
-		m["PTS"] = ptsInfo
-	}
-	if PTS_DTS_flags == 3 {
-		ptsdtsInfo := map[string]interface{}{
-			"fixed1":      4,
-			"PTS1":        3,
-			"marker_bit1": 1,
-			"PTS2":        15,
-			"marker_bit2": 1,
-			"PTS3":        15,
-			"marker_bit3": 1,
-			"fixed2":      4,
-			"DTS1":        3,
-			"marker_bit4": 1,
-			"DTS2":        15,
-			"marker_bit5": 1,
-			"DTS3":        15,
-			"marker_bit6": 1,
-		}
-		dec.decode(ptsdtsInfo)
-		m["PTSDTS"] = ptsdtsInfo
-	}
+func (dec *PsDecoder) decodePTSDTS(dm *DataManager) error {
+
 	return nil
 }
 
-func (dec *PsDecoder) decodeESCR(m map[string]interface{}) error {
-	if m["ESCR_flag"].(uint64) != 1 {
+func (dec *PsDecoder) decodeESCR(dm *DataManager) error {
+	if dm.get("ESCR_flag") != 1 {
 		return nil
 	}
-	escrInfo := map[string]interface{}{
-		"reserved":       1,
-		"ESCR_base1":     3,
-		"marker_bit1":    1,
-		"ESCR_base2":     15,
-		"marker_bit2":    1,
-		"ESCR_base3":     15,
-		"marker_bit3":    1,
-		"ESCR_extension": 9,
-		"marker_bit4":    1,
-	}
 	dec.decode(escrInfo)
-	m["ESCR"] = escrInfo
 	return nil
 }
 
@@ -377,11 +464,7 @@ func (dec *PsDecoder) decodeESRate(m map[string]interface{}) error {
 	if m["ES_rate_flag"].(uint64) != 1 {
 		return nil
 	}
-	esRateInfo := map[string]interface{}{
-		"marker_bit1": 1,
-		"ES_rate":     22,
-		"marker_bit2": 1,
-	}
+
 	dec.decode(esRateInfo)
 	m["ES_rate"] = esRateInfo
 	return nil
@@ -428,38 +511,8 @@ func (dec *PsDecoder) decodeCRC(m map[string]interface{}) error {
 	return nil
 }
 
-func (dec *PsDecoder) decodePesBase() (map[string]interface{}, error) {
-	m := map[string]interface{}{
-		"PES_packet_length":         16,
-		"fixed":                     2,
-		"PES_scrambling_control":    1,
-		"PES_priority":              1,
-		"data_alignment_indicator":  1,
-		"copyright":                 1,
-		"original_or_copy":          1,
-		"PTS_DTS_flags":             2,
-		"ESCR_flag":                 1,
-		"ES_rate_flag":              1,
-		"DSM_trick_mode_flag":       1,
-		"additional_copy_info_flag": 1,
-		"PES_CRC_flag":              1,
-		"PES_extension_flag":        1,
-		"PES_header_data_length":    8,
-	}
-	dec.decode(m)
-	return m, nil
-}
-
 func (dec *PsDecoder) decodePesExtension(m map[string]interface{}) error {
-	pesExt := map[string]interface{}{
-		"PES_private_data_flag":                1,
-		"pack_header_field_flag":               1,
-		"program_packet_sequence_counter_flag": 1,
-		"P-STD_buffer_flag":                    1,
-		"reserved":                             3,
-		"PES_extension_flag_2":                 1,
-	}
-	dec.decode(pesExt)
+	dm.decode(pesExt)
 	m["PES_xtension"] = pesExt
 	if m["PES_private_data_flag"].(uint64) == 1 {
 		b := make([]byte, 16)
@@ -498,9 +551,19 @@ func (dec *PsDecoder) decodePesExtension(m map[string]interface{}) error {
 }
 
 func (dec *PsDecoder) decodePESHeader() error {
-	m, _ := dec.decodePesBase()
-	dec.decodePTSDTS(m)
-	dec.decodeESCR(m)
+	dm := NewDataManager(dec.br)
+	dm.decode(pes)
+	PTS_DTS_flags := dm.get("PTS_DTS_flags")
+	if PTS_DTS_flags == 2 {
+		dm.decode(ptsInfo)
+	}
+	if PTS_DTS_flags == 3 {
+		dm.decode(ptsdtsInfo)
+	}
+	if dm.get("ESCR_flag") == 1 {
+		dm.decode()
+	}
+	dec.decodeESCR(dm)
 	dec.decodeESRate(m)
 	dec.decodeDSMTrickMode(m)
 	dec.decodeAdditionalCopyInfo(m)
@@ -587,23 +650,7 @@ func (decoder *PsDecoder) decode(m map[string]interface{}) error {
 }
 
 func (decoder *PsDecoder) decodePsHeader() (map[string]interface{}, error) {
-	m := map[string]interface{}{
-		"pkt_type":                         "pack header",
-		"fixed":                            2,
-		"system_clock_refrence_base1":      3,
-		"marker_bit1":                      1,
-		"system_clock_refrence_base2":      15,
-		"marker_bit2":                      1,
-		"system_clock_refrence_base3":      15,
-		"marker_bit3":                      1,
-		"system_clock_reference_extension": 9,
-		"marker_bit4":                      1,
-		"program_mux_rate":                 22,
-		"marker_bit5":                      1,
-		"marker_bit6":                      1,
-		"resvrved":                         5,
-		"pack_stuffing_length":             3,
-	}
+
 	decoder.decode(m)
 	// skip stuffing bytes
 	decoder.br.Read(uint(m["pack_stuffing_length"].(uint64) * 8))
@@ -615,6 +662,7 @@ func (dec *PsDecoder) writeH264FrameToFile(frame []byte) error {
 		log.Println(err)
 		return err
 	}
+	// 可能是因为这个导致的写入变慢
 	dec.h264File.Sync()
 	return nil
 }
