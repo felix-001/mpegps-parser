@@ -8,7 +8,7 @@ import (
 	"log"
 	"os"
 	"param"
-	"ui"
+	"reader"
 )
 
 const (
@@ -43,7 +43,7 @@ var (
 )
 
 var (
-	packHeader = M{
+	packHeader = reader.M{
 		"pkt_type":                         "pack header",
 		"fixed":                            2,
 		"system_clock_refrence_base1":      3,
@@ -60,7 +60,7 @@ var (
 		"resvrved":                         5,
 		"pack_stuffing_length":             3,
 	}
-	systemHeader = M{
+	systemHeader = reader.M{
 		"pkt_type":                     "system header",
 		"header_length":                16,
 		"marker_bit1":                  1,
@@ -74,13 +74,13 @@ var (
 		"packet_rate_restriction_flag": 1,
 		"reserved_bits":                7,
 	}
-	systemHeaderDetail = M{
+	systemHeaderDetail = reader.M{
 		"stream_id":                8,
 		"fixed":                    2,
 		"P-STD_buffer_bound_scale": 1,
 		"P-STD_buffer_size_bound":  13,
 	}
-	programStreamMap = M{
+	programStreamMap = reader.M{
 		"pkt_type":                   "program stream map",
 		"map_stream_id":              8,
 		"program_stream_map_length":  16,
@@ -91,12 +91,12 @@ var (
 		"marker_bit":                 1,
 		"program_stream_info_length": 16,
 	}
-	elementaryStreamMap = M{
+	elementaryStreamMap = reader.M{
 		"stream_type":                   8,
 		"elementary_stream_id":          8,
 		"elementary_stream_info_length": 16,
 	}
-	ptsInfo = M{
+	ptsInfo = reader.M{
 		"fixed":       4,
 		"PTS1":        3,
 		"marker_bit1": 1,
@@ -105,7 +105,7 @@ var (
 		"PTS3":        15,
 		"marker_bit3": 1,
 	}
-	ptsdtsInfo = M{
+	ptsdtsInfo = reader.M{
 		"fixed1":      4,
 		"PTS1":        3,
 		"marker_bit1": 1,
@@ -121,7 +121,7 @@ var (
 		"DTS3":        15,
 		"marker_bit6": 1,
 	}
-	escrInfo = M{
+	escrInfo = reader.M{
 		"reserved":       1,
 		"ESCR_base1":     3,
 		"marker_bit1":    1,
@@ -132,12 +132,12 @@ var (
 		"ESCR_extension": 9,
 		"marker_bit4":    1,
 	}
-	esRateInfo = M{
+	esRateInfo = reader.M{
 		"marker_bit1": 1,
 		"ES_rate":     22,
 		"marker_bit2": 1,
 	}
-	pes = M{
+	pes = reader.M{
 		"PES_packet_length":         16,
 		"fixed":                     2,
 		"PES_scrambling_control":    1,
@@ -154,7 +154,7 @@ var (
 		"PES_extension_flag":        1,
 		"PES_header_data_length":    8,
 	}
-	pesExt = M{
+	pesExt = reader.M{
 		"PES_private_data_flag":                1,
 		"pack_header_field_flag":               1,
 		"program_packet_sequence_counter_flag": 1,
@@ -162,50 +162,24 @@ var (
 		"reserved":                             3,
 		"PES_extension_flag_2":                 1,
 	}
-)
-
-type M map[string]interface{}
-
-type DataManager struct {
-	m  M
-	br *bitreader.BitReader
-}
-
-func NewDataManager(br *bitreader.BitReader) *DataManager {
-	return &DataManager{br: br}
-}
-
-func (dm *DataManager) _decode(input, output M) error {
-	for k, v := range input {
-		_v, ok := v.(uint64)
-		if !ok {
-			continue
-		}
-		ret, err := dm.br.Read(uint(_v))
-		if err != nil {
-			log.Println("read", k, v, "err")
-			return err
-		}
-		output[k] = ret
+	dsmFastInfo = reader.M{
+		"field_id":             2,
+		"intra_slice_refresh":  1,
+		"frequency_truncation": 2,
 	}
-	return nil
-}
-
-func (dm *DataManager) decode(input M) error {
-	return dm._decode(input, dm.m)
-}
-
-func (dm *DataManager) decodeChild(m M) error {
-	return dm._decode(m, m)
-}
-
-func (dm *DataManager) set(key string, val interface{}) {
-	dm.m[key] = val
-}
-
-func (dm *DataManager) get(key string) uint64 {
-	return dm.m[key].(uint64)
-}
+	sequenceCount = reader.M{
+		"marker_bit1":                     1,
+		"program_packet_sequence_counter": 7,
+		"marker_bit2":                     1,
+		"MPEG1_MPEG2_identifier":          1,
+		"original_stuff_length":           6,
+	}
+	pstdBuf = reader.M{
+		"fixed":              2,
+		"P-STD_buffer_scale": 1,
+		"P-STD_buffer_size":  13,
+	}
+)
 
 type PsDecoder struct {
 	videoStreamType    uint32
@@ -223,38 +197,43 @@ type PsDecoder struct {
 	h264File           *os.File
 	audioFile          *os.File
 	param              *param.ConsoleParam
-	ch                 chan *ui.TableItem
+	ch                 chan *reader.PktInfo
 }
 
-func (decoder *PsDecoder) decodePkt(startCode uint32) (m map[string]interface{}, err error) {
+func (decoder *PsDecoder) decodePkt(startCode uint32) (typ string, m reader.M, err error) {
 	switch startCode {
 	case StartCodePS:
+		typ = "pack header"
 		m, err = decoder.decodePsHeader()
 	case StartCodeSYS:
+		typ = "system header"
 		m, err = decoder.decodeSystemHeader()
 	case StartCodeMAP:
+		typ = "program stream map"
 		m, err = decoder.decodeProgramStreamMap()
 	case StartCodeVideo:
-		err = decoder.decodeVideoPes()
+		typ = "video pes"
+		m, err = decoder.decodeVideoPes()
 	case StartCodeAudio:
-		err = decoder.decodeAudioPes()
+		typ = "audio pes"
+		m, err = decoder.decodeAudioPes()
 	default:
 		err = ErrNotFoundStartCode
 	}
 	return
 }
 
-func (decoder *PsDecoder) sendBasic(startCode uint32, m map[string]interface{}, status string) {
+func (decoder *PsDecoder) sendBasic(startCode uint32, m reader.M, typ, status string) {
 	if startCode == StartCodePS {
 		return
 	}
 	offset, _ := decoder.br.Offset()
-	item := &ui.TableItem{
-		Offset:  int64(offset),
-		PktType: m["pkt_type"].(string),
-		Status:  status,
+	pktInfo := &reader.PktInfo{
+		Offset: uint64(offset),
+		Typ:    typ,
+		Status: status,
 	}
-	decoder.ch <- item
+	decoder.ch <- pktInfo
 }
 
 func (decoder *PsDecoder) decodePkts() error {
@@ -268,18 +247,18 @@ func (decoder *PsDecoder) decodePkts() error {
 			return err
 		}
 		decoder.pktCnt++
-		m, err := decoder.decodePkt(uint32(startCode))
+		typ, m, err := decoder.decodePkt(uint32(startCode))
 		status := "OK"
 		if err != nil {
 			status = "Error"
 		}
-		decoder.sendBasic(uint32(startCode), m, status)
+		decoder.sendBasic(uint32(startCode), m, typ, status)
 		offset, _ = br.Offset()
 	}
 	return nil
 }
 
-func (dec *PsDecoder) decodeSystemHeader() (M, error) {
+func (dec *PsDecoder) decodeSystemHeader() (reader.M, error) {
 	dm := NewDataManager(dec.br)
 	dm.decode(systemHeader)
 	nextbits, err := dec.br.Peek(1)
@@ -300,12 +279,11 @@ func (dm *DataManager) skipBytes(size uint64) {
 	dm.br.ReadBytes(buf)
 }
 
-func (dec *PsDecoder) decodeProgramStreamMap() (map[string]interface{}, error) {
+func (dec *PsDecoder) decodeProgramStreamMap() (reader.M, error) {
 	dm := NewDataManager(dec.br)
 	dm.decode(programStreamMap)
 	dm.skipBytes(dm.get("program_stream_info_length"))
-	elementary_stream_map_length, _ := dec.br.Read(16)
-	dm.set("elementary_stream_map_length", elementary_stream_map_length)
+	elementary_stream_map_length := dm.read("elementary_stream_map_length", 16)
 	elementary_stream_maps := []map[string]interface{}{}
 	for elementary_stream_map_length > 0 {
 		dm.decodeChild(elementaryStreamMap)
@@ -315,12 +293,11 @@ func (dec *PsDecoder) decodeProgramStreamMap() (map[string]interface{}, error) {
 		elementary_stream_map_length -= 4 + elementary_stream_info_length
 	}
 	dm.set("elementary_stream_map", elementary_stream_maps)
-	CRC_32, _ := dec.br.Read(32)
-	dm.set("CRC_32", CRC_32)
+	dm.read("CRC_32", 32)
 	return dm.m, nil
 }
 
-func (dec *PsDecoder) decodeH264(data []byte, len uint32, err bool) error {
+func (dec *PsDecoder) decodeH264(data []byte) error {
 	if dec.param.Verbose {
 		if data[4] == 0x67 {
 			log.Println("\t\tSPS")
@@ -330,25 +307,22 @@ func (dec *PsDecoder) decodeH264(data []byte, len uint32, err bool) error {
 		}
 		if data[4] == 0x65 {
 			log.Println("\t\tIDR")
-			if err {
-				dec.errIFrameCnt++
-			} else {
-				dec.iFrameCnt++
-			}
 		}
 		if data[4] == 0x61 {
 			log.Println("\t\tP Frame")
 			dec.pFrameCnt++
 		}
 	}
-	if !err && dec.h264File != nil {
+	// TODO: 命令行参数设置错误的帧是否写入文件
+	if dec.h264File != nil {
 		dec.writeH264FrameToFile(data)
 	}
 	return nil
 }
 
-func (dec *PsDecoder) saveAudioPkt(data []byte, len uint32, err bool) error {
-	if !err && dec.audioFile != nil {
+func (dec *PsDecoder) saveAudioPkt(data []byte) error {
+	// TODO: 命令行参数可以设置错误的帧是否写入文件
+	if dec.audioFile != nil {
 		dec.writeAudioFrameToFile(data)
 	}
 	return nil
@@ -367,7 +341,7 @@ func (dec *PsDecoder) isStartCodeValid(startCode uint32) bool {
 
 // 移动到当前位置+payloadLen位置，判断startcode是否正确
 // 如果startcode不正确，说明payloadLen是错误的
-func (dec *PsDecoder) isPayloadLenValid(payloadLen uint32, pesType int, pesStartPos int64) bool {
+func (dec *PsDecoder) isPayloadLenValid(payloadLen uint64, pesType int, pesStartPos int64) bool {
 	br := dec.br
 	offset, _ := br.Offset()
 	pos := offset + int64(payloadLen)
@@ -405,7 +379,7 @@ func (dec *PsDecoder) GetNextPackPos() int64 {
 	return br.Size()
 }
 
-func (dec *PsDecoder) ReadInvalidBytes(payloadLen uint32, pesType int, pesStartPos int64) error {
+func (dec *PsDecoder) ReadInvalidBytes(payloadLen uint64, pesType int, pesStartPos int64) ([]byte, error) {
 	if pesType == VideoPES {
 		dec.errVideoFrameCnt++
 	} else {
@@ -421,74 +395,41 @@ func (dec *PsDecoder) ReadInvalidBytes(payloadLen uint32, pesType int, pesStartP
 	// 由于payloadLen是错误的，所以下一个startcode和当前位置之间的字节需要丢弃
 	if _, err := br.ReadBytes(readBuf); err != nil {
 		log.Println(err)
-		return err
+		return nil, err
 	}
-	if pesType == AudioPES {
-		dec.saveAudioPkt(readBuf, uint32(readLen), true)
-	} else {
-		dec.decodeH264(readBuf, uint32(readLen), true)
-	}
-	return nil
+	return readBuf, nil
 }
 
-func (dec *PsDecoder) decodeAudioPes() error {
+func (dec *PsDecoder) getPesPayloadLen(dm *DataManager) uint64 {
+	payloadLen := dm.get("PES_packet_length")
+	PES_header_data_length := dm.get("PES_header_data_length")
+	// 3 - 各种flag + PES_header_data_length本身的8个bit
+	return payloadLen - 3 - PES_header_data_length
+}
+
+func (dec *PsDecoder) decodeAudioPes() (reader.M, error) {
 	dec.totalAudioFrameCnt++
-	err := dec.decodePES(AudioPES)
+	dm := NewDataManager(dec.br)
+	payload, err := dec.decodePES(AudioPES, dm)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	payloadLen := dec.videoPes.PayloadLen
-	payloadData := make([]byte, payloadLen)
-	if _, err := dec.br.ReadBytes(payloadData); err != nil {
-		log.Println(err)
-		return err
-	}
-	dec.saveAudioPkt(payloadData, uint32(payloadLen), false)
-	return nil
+	dec.saveAudioPkt(payload)
+	return dm.m, nil
 }
 
-func (dec *PsDecoder) decodePTSDTS(dm *DataManager) error {
+func (dec *PsDecoder) decodeDSMTrickMode(dm *DataManager) error {
 
-	return nil
-}
-
-func (dec *PsDecoder) decodeESCR(dm *DataManager) error {
-	if dm.get("ESCR_flag") != 1 {
-		return nil
-	}
-	dec.decode(escrInfo)
-	return nil
-}
-
-func (dec *PsDecoder) decodeESRate(m map[string]interface{}) error {
-	if m["ES_rate_flag"].(uint64) != 1 {
-		return nil
-	}
-
-	dec.decode(esRateInfo)
-	m["ES_rate"] = esRateInfo
-	return nil
-}
-
-func (dec *PsDecoder) decodeDSMTrickMode(m map[string]interface{}) error {
-	if m["(DSM_trick_mode_flag"].(uint64) != 1 {
-		return nil
-	}
 	trick_mode_control, _ := dec.br.Read(3)
-	m["trick_mode_control"] = trick_mode_control
+	dm.set("trick_mode_control", trick_mode_control)
 	switch trick_mode_control {
 	case fast_forward:
 	case fast_reverse:
-		info := map[string]interface{}{
-			"field_id":             2,
-			"intra_slice_refresh":  1,
-			"frequency_truncation": 2,
-		}
-		dec.decode(info)
-		m["trick_mode"] = info
+		dm.decode(dsmFastInfo)
 	case slow_motion:
 	case slow_reverse:
-		m["rep_cntrl"], _ = dec.br.Read(5)
+		rep_cntrl, _ := dec.br.Read(5)
+		dm.set("rep_cntrl", rep_cntrl)
 	default:
 		dec.br.Read(5)
 
@@ -496,165 +437,99 @@ func (dec *PsDecoder) decodeDSMTrickMode(m map[string]interface{}) error {
 	return nil
 }
 
-func (dec *PsDecoder) decodeAdditionalCopyInfo(m map[string]interface{}) error {
-	if m["additional_copy_info_flag"].(uint64) == 1 {
-		dec.br.Read(1)
-		m["additional_copy_info"], _ = dec.br.Read(7)
-	}
-	return nil
-}
-
-func (dec *PsDecoder) decodeCRC(m map[string]interface{}) error {
-	if m["PES_CRC_flag"].(uint64) == 1 {
-		m["previous_PES_packet_CRC"], _ = dec.br.Read(16)
-	}
-	return nil
-}
-
-func (dec *PsDecoder) decodePesExtension(m map[string]interface{}) error {
+func (dec *PsDecoder) decodePesExtension(dm *DataManager) error {
 	dm.decode(pesExt)
-	m["PES_xtension"] = pesExt
-	if m["PES_private_data_flag"].(uint64) == 1 {
-		b := make([]byte, 16)
-		dec.br.ReadBytes(b)
+	if dm.get("PES_private_data_flag") == 1 {
+		dm.skipBytes(16)
 	}
-	if m["pack_header_field_flag"].(uint64) == 1 {
-		pack_field_length, _ := dec.br.Read(8)
-		m["pack_field_length"] = pack_field_length
-		b := make([]byte, pack_field_length)
-		dec.br.ReadBytes(b)
+	if dm.get("pack_header_field_flag") == 1 {
+		pack_field_length := dm.read("pack_field_length", 8)
+		dm.skipBytes(pack_field_length)
 	}
-	if m["program_packet_sequence_counter_flag"].(uint64) == 1 {
-		sequenceCount := map[string]interface{}{
-			"marker_bit1":                     1,
-			"program_packet_sequence_counter": 7,
-			"marker_bit2":                     1,
-			"MPEG1_MPEG2_identifier":          1,
-			"original_stuff_length":           6,
-		}
-		dec.decode(sequenceCount)
-		m["sequence_counter"] = sequenceCount
+	if dm.get("program_packet_sequence_counter_flag") == 1 {
+		dm.decodeChild(sequenceCount)
+		dm.set("program_packet_sequence_counter", sequenceCount)
 	}
-	if m[" P-STD_buffer_flag"].(uint64) == 1 {
-		dec.br.Read(2)
-		m["P-STD_buffer_scale"], _ = dec.br.Read(1)
-		m["P-STD_buffer_size"], _ = dec.br.Read(13)
+	if dm.get("P-STD_buffer_flag") == 1 {
+		dm.decodeChild(pstdBuf)
+		dm.set(" P-STD_buffer", pstdBuf)
 	}
-	if m["PES_extension_flag_2"].(uint64) == 1 {
+	if dm.get("PES_extension_flag_2") == 1 {
 		dec.br.Read(1)
-		PES_extension_field_length, _ := dec.br.Read(7)
-		m["PES_extension_field_length"] = PES_extension_field_length
-		b := make([]byte, PES_extension_field_length)
-		dec.br.ReadBytes(b)
+		PES_extension_field_length := dm.read("PES_extension_field_length", 7)
+		dm.skipBytes(PES_extension_field_length)
 	}
 	return nil
 }
 
-func (dec *PsDecoder) decodePESHeader() error {
-	dm := NewDataManager(dec.br)
+func (dec *PsDecoder) decodePESHeader(dm *DataManager) {
 	dm.decode(pes)
-	PTS_DTS_flags := dm.get("PTS_DTS_flags")
-	if PTS_DTS_flags == 2 {
+	if dm.get("PTS_DTS_flags") == 2 {
 		dm.decode(ptsInfo)
 	}
-	if PTS_DTS_flags == 3 {
+	if dm.get("PTS_DTS_flags") == 3 {
 		dm.decode(ptsdtsInfo)
 	}
 	if dm.get("ESCR_flag") == 1 {
-		dm.decode()
+		dm.decode(escrInfo)
 	}
-	dec.decodeESCR(dm)
-	dec.decodeESRate(m)
-	dec.decodeDSMTrickMode(m)
-	dec.decodeAdditionalCopyInfo(m)
-	dec.decodeCRC(m)
-
-	br := dec.br
-	/* payload length */
-	payloadLen, err := br.Read(16)
-	if err != nil {
-		log.Println(err)
-		return err
+	if dm.get("ES_rate_flag") == 1 {
+		dm.decode(esRateInfo)
 	}
-
-	/* flags: pts_dts_flags ... */
-	br.Read(16) // 跳过各种flags,比如pts_dts_flags
-	payloadLen -= 2
-
-	/* pes header data length */
-	pesHeaderDataLen, err := br.Read(8)
-	if err != nil {
-		log.Println(err)
-		return err
+	if dm.get("(DSM_trick_mode_flag") != 1 {
+		dec.decodeDSMTrickMode(dm)
 	}
-	payloadLen--
-
-	/* pes header data */
-	b := make([]byte, pesHeaderDataLen)
-	br.ReadBytes(b)
-	payloadLen -= pesHeaderDataLen
-
-	videoPes := dec.videoPes
-	videoPes.PayloadLen = payloadLen
-	videoPes.PesHeaderDataLen = pesHeaderDataLen
-
-	return nil
+	if dm.get("additional_copy_info_flag") == 1 {
+		dec.br.Read(1)
+		additional_copy_info, _ := dec.br.Read(7)
+		dm.set("additional_copy_info", additional_copy_info)
+	}
+	if dm.get("PES_CRC_flag") == 1 {
+		previous_PES_packet_CRC, _ := dec.br.Read(16)
+		dm.set("previous_PES_packet_CRC", previous_PES_packet_CRC)
+	}
+	if dm.get("PES_extension_flag_2") == 1 {
+		dec.decodePesExtension(dm)
+	}
 }
 
-func (dec *PsDecoder) decodePES(pesType int) error {
+func (dec *PsDecoder) readBytes(size uint64) ([]byte, error) {
+	buf := make([]byte, size)
+	if _, err := dec.br.ReadBytes(buf); err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	return buf, nil
+}
+
+func (dec *PsDecoder) decodePES(pesType int, dm *DataManager) ([]byte, error) {
 	offset, _ := dec.br.Offset()
 	pesStartPos := offset - 4 // 4为startcode的长度
-	err := dec.decodePESHeader()
-	if err != nil {
-		return err
-	}
-	payloadLen := uint32(dec.videoPes.PayloadLen)
+	dec.decodePESHeader(dm)
+	payloadLen := dec.getPesPayloadLen(dm)
 	if !dec.isPayloadLenValid(payloadLen, pesType, pesStartPos) {
-		dec.ReadInvalidBytes(payloadLen, pesType, pesStartPos)
-		return ErrCheckPayloadLen
+		return dec.ReadInvalidBytes(payloadLen, pesType, pesStartPos)
 	}
-
-	return nil
+	return dec.readBytes(payloadLen)
 }
 
-func (dec *PsDecoder) decodeVideoPes() error {
+func (dec *PsDecoder) decodeVideoPes() (reader.M, error) {
 	dec.totalVideoFrameCnt++
-	err := dec.decodePES(VideoPES)
+	dm := NewDataManager(dec.br)
+	payload, err := dec.decodePES(VideoPES, dm)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	payloadLen := dec.videoPes.PayloadLen
-	payloadData := make([]byte, payloadLen)
-	if _, err := dec.br.ReadBytes(payloadData); err != nil {
-		log.Println(err)
-		return err
-	}
-	dec.decodeH264(payloadData, uint32(payloadLen), false)
-	return nil
+	dec.decodeH264(payload)
+	return dm.m, nil
 }
 
-func (decoder *PsDecoder) decode(m map[string]interface{}) error {
-	for k, v := range m {
-		_v, ok := v.(uint64)
-		if !ok {
-			continue
-		}
-		ret, err := decoder.br.Read(uint(_v))
-		if err != nil {
-			log.Println("read", k, v, "err")
-			return err
-		}
-		m[k] = ret
-	}
-	return nil
-}
-
-func (decoder *PsDecoder) decodePsHeader() (map[string]interface{}, error) {
-
-	decoder.decode(m)
+func (decoder *PsDecoder) decodePsHeader() (reader.M, error) {
+	dm := NewDataManager(decoder.br)
+	dm.decode(packHeader)
 	// skip stuffing bytes
-	decoder.br.Read(uint(m["pack_stuffing_length"].(uint64) * 8))
-	return m, nil
+	dm.skipBytes(dm.get("pack_stuffing_length"))
+	return dm.data(), nil
 }
 
 func (dec *PsDecoder) writeH264FrameToFile(frame []byte) error {
@@ -696,7 +571,7 @@ func (dec *PsDecoder) openAudioFile() error {
 	return nil
 }
 
-func (decoder *PsDecoder) ParseDetail(offset int, typ string) error {
+func (decoder *PsDecoder) ParseDetail(offset int, typ string) (reader.M, error) {
 	switch typ {
 	case "video pes":
 		return decoder.decodeVideoPes()
@@ -705,14 +580,14 @@ func (decoder *PsDecoder) ParseDetail(offset int, typ string) error {
 	case "program stream map":
 		return decoder.decodeProgramStreamMap()
 	}
-	return nil
+	return nil, nil
 }
 
 func (dec *PsDecoder) Run() {
 	go dec.decodePkts()
 }
 
-func New(param *param.ConsoleParam, ch chan *ui.TableItem) *PsDecoder {
+func New(param *param.ConsoleParam, ch chan *reader.PktInfo) *PsDecoder {
 	f, err := os.Open(param.PsFile)
 	if err != nil {
 		log.Println(err)
