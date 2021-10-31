@@ -1,6 +1,6 @@
 package reader
 
-type M map[string]interface{}
+import "ntree"
 
 type PktInfo struct {
 	Typ    string
@@ -9,5 +9,5 @@ type PktInfo struct {
 }
 
 type DetailReader interface {
-	ParseDetail(offset int, typ string) (M, error)
+	ParseDetail(offset int, typ string) (*ntree.NTree, error)
 }

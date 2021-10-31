@@ -42,141 +42,147 @@ var (
 	ErrCheckInputFile    = errors.New("check input file error")
 )
 
+// map遍历是无序的
+type Item struct {
+	k string
+	v uint64
+}
+
+type Items []Item
+
 var (
-	packHeader = reader.M{
-		"fixed":                            2,
-		"system_clock_refrence_base1":      3,
-		"marker_bit1":                      1,
-		"system_clock_refrence_base2":      15,
-		"marker_bit2":                      1,
-		"system_clock_refrence_base3":      15,
-		"marker_bit3":                      1,
-		"system_clock_reference_extension": 9,
-		"marker_bit4":                      1,
-		"program_mux_rate":                 22,
-		"marker_bit5":                      1,
-		"marker_bit6":                      1,
-		"resvrved":                         5,
-		"pack_stuffing_length":             3,
+	packHeader = Items{
+		{"fixed", 2},
+		{"system_clock_reference_base1", 3},
+		{"marker_bit1", 1},
+		{"system_clock_reference_base2", 15},
+		{"marker_bit2", 1},
+		{"system_clock_reference_base3", 15},
+		{"marker_bit3", 1},
+		{"system_clock_reference_extension", 9},
+		{"marker_bit4", 1},
+		{"program_mux_rate", 22},
+		{"marker_bit5", 1},
+		{"marker_bit6", 1},
+		{"resvrved", 5},
+		{"pack_stuffing_length", 3},
 	}
-	systemHeader = reader.M{
-		"pkt_type":                     "system header",
-		"header_length":                16,
-		"marker_bit1":                  1,
-		"rate_bound":                   22,
-		"fixed_flag":                   1,
-		"CSPS_flag":                    1,
-		"system_audio_lock_flag":       1,
-		"system_video_lock_flag":       1,
-		"marker_bit2":                  1,
-		"video_bound":                  5,
-		"packet_rate_restriction_flag": 1,
-		"reserved_bits":                7,
+	systemHeader = Items{
+		{"header_length", 16},
+		{"marker_bit1", 1},
+		{"rate_bound", 22},
+		{"fixed_flag", 1},
+		{"CSPS_flag", 1},
+		{"system_audio_lock_flag", 1},
+		{"system_video_lock_flag", 1},
+		{"marker_bit2", 1},
+		{"video_bound", 5},
+		{"packet_rate_restriction_flag", 1},
+		{"reserved_bits", 7},
 	}
-	systemHeaderDetail = reader.M{
-		"stream_id":                8,
-		"fixed":                    2,
-		"P-STD_buffer_bound_scale": 1,
-		"P-STD_buffer_size_bound":  13,
+	systemHeaderDetail = Items{
+		{"stream_id", 8},
+		{"fixed", 2},
+		{"P-STD_buffer_bound_scale", 1},
+		{"P-STD_buffer_size_bound", 13},
 	}
-	programStreamMap = reader.M{
-		"pkt_type":                   "program stream map",
-		"map_stream_id":              8,
-		"program_stream_map_length":  16,
-		"current_next_indicator":     1,
-		"reserved1":                  2,
-		"program_stream_map_version": 5,
-		"reserved2":                  7,
-		"marker_bit":                 1,
-		"program_stream_info_length": 16,
+	programStreamMap = Items{
+		{"map_stream_id", 8},
+		{"program_stream_map_length", 16},
+		{"current_next_indicator", 1},
+		{"reserved1", 2},
+		{"program_stream_map_version", 5},
+		{"reserved2", 7},
+		{"marker_bit", 1},
+		{"program_stream_info_length", 16},
 	}
-	elementaryStreamMap = reader.M{
-		"stream_type":                   8,
-		"elementary_stream_id":          8,
-		"elementary_stream_info_length": 16,
+	elementaryStreamMap = Items{
+		{"stream_type", 8},
+		{"elementary_stream_id", 8},
+		{"elementary_stream_info_length", 16},
 	}
-	ptsInfo = reader.M{
-		"fixed":       4,
-		"PTS1":        3,
-		"marker_bit1": 1,
-		"PTS2":        15,
-		"marker_bit2": 1,
-		"PTS3":        15,
-		"marker_bit3": 1,
+	ptsInfo = Items{
+		{"fixed", 4},
+		{"PTS1", 3},
+		{"marker_bit1", 1},
+		{"PTS2", 15},
+		{"marker_bit2", 1},
+		{"PTS3", 15},
+		{"marker_bit3", 1},
 	}
-	ptsdtsInfo = reader.M{
-		"fixed1":      4,
-		"PTS1":        3,
-		"marker_bit1": 1,
-		"PTS2":        15,
-		"marker_bit2": 1,
-		"PTS3":        15,
-		"marker_bit3": 1,
-		"fixed2":      4,
-		"DTS1":        3,
-		"marker_bit4": 1,
-		"DTS2":        15,
-		"marker_bit5": 1,
-		"DTS3":        15,
-		"marker_bit6": 1,
+	ptsdtsInfo = Items{
+		{"fixed1", 4},
+		{"PTS1", 3},
+		{"marker_bit1", 1},
+		{"PTS2", 15},
+		{"marker_bit2", 1},
+		{"PTS3", 15},
+		{"marker_bit3", 1},
+		{"fixed2", 4},
+		{"DTS1", 3},
+		{"marker_bit4", 1},
+		{"DTS2", 15},
+		{"marker_bit5", 1},
+		{"DTS3", 15},
+		{"marker_bit6", 1},
 	}
-	escrInfo = reader.M{
-		"reserved":       1,
-		"ESCR_base1":     3,
-		"marker_bit1":    1,
-		"ESCR_base2":     15,
-		"marker_bit2":    1,
-		"ESCR_base3":     15,
-		"marker_bit3":    1,
-		"ESCR_extension": 9,
-		"marker_bit4":    1,
+	escrInfo = Items{
+		{"reserved", 1},
+		{"ESCR_base1", 3},
+		{"marker_bit1", 1},
+		{"ESCR_base2", 15},
+		{"marker_bit2", 1},
+		{"ESCR_base3", 15},
+		{"marker_bit3", 1},
+		{"ESCR_extension", 9},
+		{"marker_bit4", 1},
 	}
-	esRateInfo = reader.M{
-		"marker_bit1": 1,
-		"ES_rate":     22,
-		"marker_bit2": 1,
+	esRateInfo = Items{
+		{"marker_bit1", 1},
+		{"ES_rate", 22},
+		{"marker_bit2", 1},
 	}
-	pes = reader.M{
-		"PES_packet_length":         16,
-		"fixed":                     2,
-		"PES_scrambling_control":    1,
-		"PES_priority":              1,
-		"data_alignment_indicator":  1,
-		"copyright":                 1,
-		"original_or_copy":          1,
-		"PTS_DTS_flags":             2,
-		"ESCR_flag":                 1,
-		"ES_rate_flag":              1,
-		"DSM_trick_mode_flag":       1,
-		"additional_copy_info_flag": 1,
-		"PES_CRC_flag":              1,
-		"PES_extension_flag":        1,
-		"PES_header_data_length":    8,
+	pes = Items{
+		{"PES_packet_length", 16},
+		{"fixed", 2},
+		{"PES_scrambling_control", 1},
+		{"PES_priority", 1},
+		{"data_alignment_indicator", 1},
+		{"copyright", 1},
+		{"original_or_copy", 1},
+		{"PTS_DTS_flags", 2},
+		{"ESCR_flag", 1},
+		{"ES_rate_flag", 1},
+		{"DSM_trick_mode_flag", 1},
+		{"additional_copy_info_flag", 1},
+		{"PES_CRC_flag", 1},
+		{"PES_extension_flag", 1},
+		{"PES_header_data_length", 8},
 	}
-	pesExt = reader.M{
-		"PES_private_data_flag":                1,
-		"pack_header_field_flag":               1,
-		"program_packet_sequence_counter_flag": 1,
-		"P-STD_buffer_flag":                    1,
-		"reserved":                             3,
-		"PES_extension_flag_2":                 1,
+	pesExt = Items{
+		{"PES_private_data_flag", 1},
+		{"pack_header_field_flag", 1},
+		{"program_packet_sequence_counter_flag", 1},
+		{"P-STD_buffer_flag", 1},
+		{"reserved", 3},
+		{"PES_extension_flag_2", 1},
 	}
-	dsmFastInfo = reader.M{
-		"field_id":             2,
-		"intra_slice_refresh":  1,
-		"frequency_truncation": 2,
+	dsmFastInfo = Items{
+		{"field_id", 2},
+		{"intra_slice_refresh", 1},
+		{"frequency_truncation", 2},
 	}
-	sequenceCount = reader.M{
-		"marker_bit1":                     1,
-		"program_packet_sequence_counter": 7,
-		"marker_bit2":                     1,
-		"MPEG1_MPEG2_identifier":          1,
-		"original_stuff_length":           6,
+	sequenceCount = Items{
+		{"marker_bit1", 1},
+		{"program_packet_sequence_counter", 7},
+		{"marker_bit2", 1},
+		{"MPEG1_MPEG2_identifier", 1},
+		{"original_stuff_length", 6},
 	}
-	pstdBuf = reader.M{
-		"fixed":              2,
-		"P-STD_buffer_scale": 1,
-		"P-STD_buffer_size":  13,
+	pstdBuf = Items{
+		{"fixed", 2},
+		{"P-STD_buffer_scale", 1},
+		{"P-STD_buffer_size", 13},
 	}
 )
 
@@ -463,6 +469,7 @@ func (dec *PsDecoder) decodePesExtension(dm *DataManager) error {
 
 func (dec *PsDecoder) decodePESHeader(dm *DataManager) {
 	dm.decode(pes)
+	fmt.Printf("%+v", dm.m)
 	if dm.get("PTS_DTS_flags") == 2 {
 		dm.decode(ptsInfo)
 	}
@@ -475,7 +482,7 @@ func (dec *PsDecoder) decodePESHeader(dm *DataManager) {
 	if dm.get("ES_rate_flag") == 1 {
 		dm.decode(esRateInfo)
 	}
-	if dm.get("(DSM_trick_mode_flag") != 1 {
+	if dm.get("(DSM_trick_mode_flag") == 1 {
 		dec.decodeDSMTrickMode(dm)
 	}
 	if dm.get("additional_copy_info_flag") == 1 {
@@ -530,9 +537,12 @@ func (dec *PsDecoder) decodeVideoPes() (reader.M, error) {
 func (decoder *PsDecoder) decodePsHeader() (reader.M, error) {
 	dm := NewDataManager(decoder.br)
 	dm.decode(packHeader)
-	log.Printf("%+v\n", dm.m)
+	offset, _ := decoder.br.Offset()
+	log.Printf("%+v offset:%d\n", dm.m, offset)
 	// skip stuffing bytes
 	dm.skipBytes(dm.get("pack_stuffing_length"))
+	offset, _ = decoder.br.Offset()
+	log.Println("offset", offset)
 	return dm.data(), nil
 }
 
