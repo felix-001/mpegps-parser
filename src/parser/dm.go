@@ -3,22 +3,21 @@ package parser
 import (
 	"bitreader"
 	"log"
+	"reader"
 )
 
-type M map[string]interface{}
-
 type DataManager struct {
-	m  M
+	m  reader.M
 	br *bitreader.BitReader
 }
 
 func NewDataManager(br *bitreader.BitReader) *DataManager {
-	return &DataManager{br: br}
+	return &DataManager{br: br, m: reader.M{}}
 }
 
-func (dm *DataManager) _decode(input, output M) error {
+func (dm *DataManager) _decode(input, output reader.M) error {
 	for k, v := range input {
-		_v, ok := v.(uint64)
+		_v, ok := v.(int)
 		if !ok {
 			continue
 		}
@@ -32,11 +31,11 @@ func (dm *DataManager) _decode(input, output M) error {
 	return nil
 }
 
-func (dm *DataManager) decode(input M) error {
+func (dm *DataManager) decode(input reader.M) error {
 	return dm._decode(input, dm.m)
 }
 
-func (dm *DataManager) decodeChild(m M) error {
+func (dm *DataManager) decodeChild(m reader.M) error {
 	return dm._decode(m, m)
 }
 
@@ -54,6 +53,6 @@ func (dm *DataManager) read(key string, len uint) uint64 {
 	return val
 }
 
-func (dm *DataManager) data() M {
+func (dm *DataManager) data() reader.M {
 	return dm.m
 }

@@ -4,6 +4,7 @@ import (
 	"log"
 	"param"
 	"parser"
+	"reader"
 	"ui"
 )
 
@@ -11,7 +12,7 @@ const max int = 100
 
 func main() {
 	log.SetFlags(log.Lshortfile)
-	ch := make(chan *ui.TableItem, max)
+	ch := make(chan *reader.PktInfo, max)
 	param, err := param.ParseConsoleParam()
 	if err != nil {
 		return

@@ -80,12 +80,12 @@ func (m *CustomTableModel) add(item TableItem) {
 
 type ui struct {
 	model        *CustomTableModel
-	ch           chan *TableItem
+	ch           chan *reader.PktInfo
 	treeModel    *gui.QStandardItemModel
 	detailReader reader.DetailReader
 }
 
-func New(ch chan *TableItem, detailReader reader.DetailReader) *ui {
+func New(ch chan *reader.PktInfo, detailReader reader.DetailReader) *ui {
 	return &ui{ch: ch, detailReader: detailReader}
 }
 
@@ -126,13 +126,15 @@ func (ui *ui) Disp() {
 	tableview.SetSelectionBehavior(widgets.QAbstractItemView__SelectRows)
 	ui.model = NewCustomTableModel(nil)
 	tableview.ConnectClicked(func(index *core.QModelIndex) {
-		offset := ui.model.Index(index.Row(), 0, nil).Data(0).ToLongLong(nil)
-		typ := ui.model.Index(index.Row(), 0, nil).Data(0).ToString()
-		tree, _ := ui.detailReader.ParseDetail(int(offset), typ)
-		var item *gui.QStandardItem
-		ret := tree.Traverse(callback, item)
-		item = ret.(*gui.QStandardItem)
-		ui.treeModel.SetItem2(0, item)
+		/*
+			offset := ui.model.Index(index.Row(), 0, nil).Data(0).ToLongLong(nil)
+			typ := ui.model.Index(index.Row(), 0, nil).Data(0).ToString()
+			tree, _ := ui.detailReader.ParseDetail(int(offset), typ)
+			var item *gui.QStandardItem
+			ret := tree.Traverse(callback, item)
+			item = ret.(*gui.QStandardItem)
+			ui.treeModel.SetItem2(0, item)
+		*/
 
 	})
 	tableview.SetModel(ui.model)
@@ -152,11 +154,16 @@ func (ui *ui) Disp() {
 	app.Exec()
 }
 
-func (ui *ui) ShowData(ch chan *TableItem) {
+func (ui *ui) ShowData(ch chan *reader.PktInfo) {
 	for {
 		if data, ok := <-ch; ok {
 			// todo tabview 也使用standrand model
-			ui.model.Add(*data)
+			item := TableItem{
+				Offset:  int64(data.Offset),
+				PktType: data.Typ,
+				Status:  data.Status,
+			}
+			ui.model.Add(item)
 		}
 	}
 }

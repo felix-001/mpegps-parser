@@ -44,7 +44,6 @@ var (
 
 var (
 	packHeader = reader.M{
-		"pkt_type":                         "pack header",
 		"fixed":                            2,
 		"system_clock_refrence_base1":      3,
 		"marker_bit1":                      1,
@@ -248,6 +247,10 @@ func (decoder *PsDecoder) decodePkts() error {
 		}
 		decoder.pktCnt++
 		typ, m, err := decoder.decodePkt(uint32(startCode))
+		if err != nil && err != ErrCheckPayloadLen {
+			log.Println(err)
+			return err
+		}
 		status := "OK"
 		if err != nil {
 			status = "Error"
@@ -391,13 +394,9 @@ func (dec *PsDecoder) ReadInvalidBytes(payloadLen uint64, pesType int, pesStartP
 	readLen := pos - offset
 	log.Printf("pes payload len err, expect: %d actual: %d", payloadLen, readLen)
 	log.Printf("Read len: %d, next pack pos:%d", readLen, pos)
-	readBuf := make([]byte, readLen)
 	// 由于payloadLen是错误的，所以下一个startcode和当前位置之间的字节需要丢弃
-	if _, err := br.ReadBytes(readBuf); err != nil {
-		log.Println(err)
-		return nil, err
-	}
-	return readBuf, nil
+	readBuf, err := dec.readBytes(uint64(readLen))
+	return readBuf, err
 }
 
 func (dec *PsDecoder) getPesPayloadLen(dm *DataManager) uint64 {
@@ -508,7 +507,11 @@ func (dec *PsDecoder) decodePES(pesType int, dm *DataManager) ([]byte, error) {
 	dec.decodePESHeader(dm)
 	payloadLen := dec.getPesPayloadLen(dm)
 	if !dec.isPayloadLenValid(payloadLen, pesType, pesStartPos) {
-		return dec.ReadInvalidBytes(payloadLen, pesType, pesStartPos)
+		payload, err := dec.ReadInvalidBytes(payloadLen, pesType, pesStartPos)
+		if err != nil {
+			return nil, err
+		}
+		return payload, ErrCheckPayloadLen
 	}
 	return dec.readBytes(payloadLen)
 }
@@ -527,6 +530,7 @@ func (dec *PsDecoder) decodeVideoPes() (reader.M, error) {
 func (decoder *PsDecoder) decodePsHeader() (reader.M, error) {
 	dm := NewDataManager(decoder.br)
 	dm.decode(packHeader)
+	log.Printf("%+v\n", dm.m)
 	// skip stuffing bytes
 	dm.skipBytes(dm.get("pack_stuffing_length"))
 	return dm.data(), nil
