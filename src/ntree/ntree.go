@@ -15,15 +15,19 @@ func (t *NTree) Append(node *NTree) {
 	}
 	t.Childs = append(t.Childs, node)
 }
+func (t *NTree) GetData() interface{} {
+	return t.Data
+}
 
-type Compactor func(data interface{}) bool
+type DataCb func(data interface{}) bool
 
-func (t *NTree) Get(input interface{}, compactor Compactor) interface{} {
+func (t *NTree) Get(cb DataCb) *NTree {
 	for _, v := range t.Childs {
-		if compactor(v.Data) {
-			return v.Data
+		if cb(v.Data) {
+			return v
 		}
 	}
+	return nil
 }
 
 type TraverseFunc func(node *NTree, levelChange bool, opaque interface{}) interface{}

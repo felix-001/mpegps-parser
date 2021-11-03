@@ -49,16 +49,25 @@ func (dm *DataManager) set(key string, val uint64) {
 	dm.tree.Append(t)
 }
 
-func (dm *DataManager) get(key string) uint64 {
-	return dm.m[key].(uint64)
+func (dm *DataManager) get(tree *ntree.NTree, key string) *ntree.NTree {
+	t := tree.Get(func(data interface{}) bool {
+		return data.(*Item).k == key
+	})
+	return t
+}
+
+func (dm *DataManager) getDataFromTree(tree *ntree.NTree, key string) uint64 {
+	t := dm.get(tree, key)
+	log.Println(key)
+	return t.GetData().(*Item).v
+}
+
+func (dm *DataManager) getData(key string) uint64 {
+	return dm.getDataFromTree(dm.tree, key)
 }
 
 func (dm *DataManager) read(key string, len uint) uint64 {
 	val, _ := dm.br.Read(len)
 	dm.set(key, val)
 	return val
-}
-
-func (dm *DataManager) data() *ntree.NTree {
-	return dm.tree
 }
