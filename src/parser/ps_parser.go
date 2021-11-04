@@ -72,11 +72,13 @@ var (
 		{"header_length", 16},
 		{"marker_bit1", 1},
 		{"rate_bound", 22},
+		{"marker_bit2", 1},
+		{"audio_bound", 6},
 		{"fixed_flag", 1},
 		{"CSPS_flag", 1},
 		{"system_audio_lock_flag", 1},
 		{"system_video_lock_flag", 1},
-		{"marker_bit2", 1},
+		{"marker_bit3", 1},
 		{"video_bound", 5},
 		{"packet_rate_restriction_flag", 1},
 		{"reserved_bits", 7},
@@ -146,7 +148,7 @@ var (
 	pes = Items{
 		{"PES_packet_length", 16},
 		{"fixed", 2},
-		{"PES_scrambling_control", 1},
+		{"PES_scrambling_control", 2},
 		{"PES_priority", 1},
 		{"data_alignment_indicator", 1},
 		{"copyright", 1},
@@ -255,7 +257,7 @@ func (decoder *PsDecoder) decodePkts() error {
 		decoder.pktCnt++
 		typ, _, err := decoder.decodePkt(uint32(startCode))
 		if err != nil && err != ErrCheckPayloadLen {
-			log.Println(err)
+			log.Println(err, startCode, "offset:", offset)
 			return err
 		}
 		status := "OK"
@@ -283,6 +285,7 @@ func (dec *PsDecoder) decodeSystemHeader() (*ntree.NTree, error) {
 			return nil, err
 		}
 	}
+	dump(dm.tree)
 	return t, nil
 }
 
@@ -294,15 +297,19 @@ func (dm *DataManager) skipBytes(size uint64) {
 func (dec *PsDecoder) decodeProgramStreamMap() (*ntree.NTree, error) {
 	t := ntree.New(&Item{k: "program stream map"})
 	dm := NewDataManager(dec.br, t)
-	dm.decode(programStreamMap)
+	if err := dm.decode(programStreamMap); err != nil {
+		return nil, err
+	}
 	dm.skipBytes(dm.getData("program_stream_info_length"))
 
 	esTree := ntree.New(&Item{k: "elementary stream map"})
 	t.Append(esTree)
 	elementary_stream_map_length := dm.read("elementary_stream_map_length", 16)
 	for elementary_stream_map_length > 0 {
-		dm.decodeChild(elementaryStreamMap, esTree)
-		elementary_stream_info_length := dm.getData("elementary_stream_info_length")
+		if err := dm.decodeChild(elementaryStreamMap, esTree); err != nil {
+			return nil, err
+		}
+		elementary_stream_info_length := dm.getDataFromTree(esTree, "elementary_stream_info_length")
 		dm.skipBytes(elementary_stream_info_length)
 		elementary_stream_map_length -= 4 + elementary_stream_info_length
 	}
@@ -397,12 +404,10 @@ func (dec *PsDecoder) ReadInvalidBytes(payloadLen uint64, pesType int, pesStartP
 	} else {
 		dec.errAudioFrameCnt++
 	}
-	br := dec.br
-	pos := dec.GetNextPackPos()
-	offset, _ := br.Offset()
-	readLen := pos - offset
+	offset, _ := dec.br.Offset()
+	readLen := dec.GetNextPackPos() - offset
 	log.Printf("pes payload len err, expect: %d actual: %d", payloadLen, readLen)
-	log.Printf("Read len: %d, next pack pos:%d", readLen, pos)
+	log.Printf("Read len: %d, next pack pos:%d", readLen, dec.GetNextPackPos())
 	// 由于payloadLen是错误的，所以下一个startcode和当前位置之间的字节需要丢弃
 	readBuf, err := dec.readBytes(uint64(readLen))
 	return readBuf, err
@@ -412,6 +417,7 @@ func (dec *PsDecoder) getPesPayloadLen(dm *DataManager) uint64 {
 	payloadLen := dm.getData("PES_packet_length")
 	PES_header_data_length := dm.getData("PES_header_data_length")
 	// 3 - 各种flag + PES_header_data_length本身的8个bit
+	//log.Println("PES_header_data_length", PES_header_data_length)
 	return payloadLen - 3 - PES_header_data_length
 }
 
@@ -469,9 +475,20 @@ func (dec *PsDecoder) decodePesExtension(dm *DataManager) error {
 	return nil
 }
 
-func (dec *PsDecoder) decodePESHeader(dm *DataManager) {
-	dm.decode(pes)
-	//fmt.Printf("%+v", dm.m)
+func callback(node *ntree.NTree, levelChange bool, opaque interface{}) interface{} {
+	log.Printf("%s : %d\n", node.Data.(*Item).k, node.Data.(*Item).v)
+	return nil
+}
+
+func dump(t *ntree.NTree) {
+	t.Traverse(callback, nil)
+}
+
+func (dec *PsDecoder) decodePESHeader(dm *DataManager) error {
+	if err := dm.decode(pes); err != nil {
+		return err
+	}
+	start, _ := dec.br.Offset()
 	if dm.getData("PTS_DTS_flags") == 2 {
 		dm.decode(ptsInfo)
 	}
@@ -499,6 +516,15 @@ func (dec *PsDecoder) decodePESHeader(dm *DataManager) {
 	if dm.getData("PES_extension_flag") == 1 {
 		dec.decodePesExtension(dm)
 	}
+	end, _ := dec.br.Offset()
+	nb_bytes := end - start
+	if dm.getData("PES_header_data_length") > uint64(nb_bytes) {
+		nb_stuffing_bytes := dm.getData("PES_header_data_length") - uint64(nb_bytes)
+		dec.readBytes(nb_stuffing_bytes)
+	}
+	//fmt.Printf("%+v", dm.tree)
+	//dump(dm.tree)
+	return nil
 }
 
 func (dec *PsDecoder) readBytes(size uint64) ([]byte, error) {
@@ -513,7 +539,9 @@ func (dec *PsDecoder) readBytes(size uint64) ([]byte, error) {
 func (dec *PsDecoder) decodePES(pesType int, dm *DataManager) ([]byte, error) {
 	offset, _ := dec.br.Offset()
 	pesStartPos := offset - 4 // 4为startcode的长度
-	dec.decodePESHeader(dm)
+	if err := dec.decodePESHeader(dm); err != nil {
+		return nil, err
+	}
 	payloadLen := dec.getPesPayloadLen(dm)
 	if !dec.isPayloadLenValid(payloadLen, pesType, pesStartPos) {
 		payload, err := dec.ReadInvalidBytes(payloadLen, pesType, pesStartPos)

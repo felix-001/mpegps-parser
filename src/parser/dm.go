@@ -19,7 +19,7 @@ func (dm *DataManager) _decode(items Items, output *ntree.NTree) error {
 	for _, item := range items {
 		ret, err := dm.br.Read(uint(item.v))
 		if err != nil {
-			log.Println("read", item.k, item.v, "err")
+			log.Println("read", item.k, item.v, "err", err)
 			return err
 		}
 		data := &Item{
@@ -58,7 +58,7 @@ func (dm *DataManager) get(tree *ntree.NTree, key string) *ntree.NTree {
 
 func (dm *DataManager) getDataFromTree(tree *ntree.NTree, key string) uint64 {
 	t := dm.get(tree, key)
-	log.Println(key)
+	//log.Println(key)
 	return t.GetData().(*Item).v
 }
 
