@@ -41,6 +41,7 @@ var (
 	ErrCheckH264         = errors.New("check h264 error")
 	ErrCheckPayloadLen   = errors.New("check payload length error")
 	ErrCheckInputFile    = errors.New("check input file error")
+	ErrCheckLength       = errors.New("check length error")
 )
 
 // map遍历是无序的
@@ -90,7 +91,6 @@ var (
 		{"P-STD_buffer_size_bound", 13},
 	}
 	programStreamMap = Items{
-		{"map_stream_id", 8},
 		{"program_stream_map_length", 16},
 		{"current_next_indicator", 1},
 		{"reserved1", 2},
@@ -216,6 +216,8 @@ func (decoder *PsDecoder) decodePkt(startCode uint32) (typ string, t *ntree.NTre
 	case StartCodeSYS:
 		typ = "system header"
 		t, err = decoder.decodeSystemHeader()
+		offset, _ := decoder.br.Offset()
+		log.Println("StartCodeSYS", offset)
 	case StartCodeMAP:
 		typ = "program stream map"
 		t, err = decoder.decodeProgramStreamMap()
@@ -255,8 +257,10 @@ func (decoder *PsDecoder) decodePkts() error {
 			return err
 		}
 		decoder.pktCnt++
+		//log.Println("offset:", offset)
 		typ, _, err := decoder.decodePkt(uint32(startCode))
 		if err != nil && err != ErrCheckPayloadLen {
+			offset, _ := br.Offset()
 			log.Println(err, startCode, "offset:", offset)
 			return err
 		}
@@ -285,7 +289,7 @@ func (dec *PsDecoder) decodeSystemHeader() (*ntree.NTree, error) {
 			return nil, err
 		}
 	}
-	dump(dm.tree)
+	//dump(dm.tree)
 	return t, nil
 }
 
@@ -305,13 +309,23 @@ func (dec *PsDecoder) decodeProgramStreamMap() (*ntree.NTree, error) {
 	esTree := ntree.New(&Item{k: "elementary stream map"})
 	t.Append(esTree)
 	elementary_stream_map_length := dm.read("elementary_stream_map_length", 16)
+	//dm.dump()
+	//log.Println("elementary_stream_map_length", elementary_stream_map_length)
 	for elementary_stream_map_length > 0 {
 		if err := dm.decodeChild(elementaryStreamMap, esTree); err != nil {
 			return nil, err
 		}
 		elementary_stream_info_length := dm.getDataFromTree(esTree, "elementary_stream_info_length")
+		//`log.Println("elementary_stream_info_length", elementary_stream_info_length)
 		dm.skipBytes(elementary_stream_info_length)
-		elementary_stream_map_length -= 4 + elementary_stream_info_length
+		if elementary_stream_info_length+4 > elementary_stream_map_length {
+			dm.dump()
+			log.Println("elementary_stream_info_length:", elementary_stream_info_length,
+				"elementary_stream_map_length:", elementary_stream_map_length)
+			return nil, ErrCheckLength
+		}
+		elementary_stream_map_length -= (4 + elementary_stream_info_length)
+		log.Println("elementary_stream_map_length", elementary_stream_map_length)
 	}
 	dm.read("CRC_32", 32)
 	return t, nil
@@ -473,15 +487,6 @@ func (dec *PsDecoder) decodePesExtension(dm *DataManager) error {
 		dm.skipBytes(PES_extension_field_length)
 	}
 	return nil
-}
-
-func callback(node *ntree.NTree, levelChange bool, opaque interface{}) interface{} {
-	log.Printf("%s : %d\n", node.Data.(*Item).k, node.Data.(*Item).v)
-	return nil
-}
-
-func dump(t *ntree.NTree) {
-	t.Traverse(callback, nil)
 }
 
 func (dec *PsDecoder) decodePESHeader(dm *DataManager) error {

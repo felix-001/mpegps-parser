@@ -21,13 +21,13 @@ func (t *NTree) GetData() interface{} {
 
 type DataCb func(data interface{}) bool
 
-func (t *NTree) Get(cb DataCb) *NTree {
+func (t *NTree) Get(cb DataCb) (node *NTree) {
 	for _, v := range t.Childs {
 		if cb(v.Data) {
-			return v
+			node = v
 		}
 	}
-	return nil
+	return
 }
 
 type TraverseFunc func(node *NTree, levelChange bool, opaque interface{}) interface{}

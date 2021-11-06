@@ -38,6 +38,8 @@ func (br *BitReader) Size() int64 {
 func (br *BitReader) fill() error {
 	data := make([]byte, 8)
 	if _, err := br.r.Read(data); err != nil {
+		offset, _ := br.Offset()
+		log.Println(err, offset)
 		return err
 	}
 	br.data = binary.BigEndian.Uint64(data)

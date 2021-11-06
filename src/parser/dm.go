@@ -71,3 +71,12 @@ func (dm *DataManager) read(key string, len uint) uint64 {
 	dm.set(key, val)
 	return val
 }
+
+func callback(node *ntree.NTree, levelChange bool, opaque interface{}) interface{} {
+	log.Printf("%s : 0x%x\n", node.Data.(*Item).k, node.Data.(*Item).v)
+	return nil
+}
+
+func (dm *DataManager) dump() {
+	dm.tree.Traverse(callback, nil)
+}
