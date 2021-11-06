@@ -621,6 +621,8 @@ func (decoder *PsDecoder) ParseDetail(offset int64, typ string) (t *ntree.NTree,
 		t, err = decoder.decodeAudioPes()
 	case "program stream map":
 		t, err = decoder.decodeProgramStreamMap()
+	case "system header":
+		t, err = decoder.decodeSystemHeader()
 	default:
 		err = ErrCheckTyp
 	}
