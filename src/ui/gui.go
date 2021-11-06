@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"fmt"
+	"log"
 	"ntree"
 	"os"
 	"reader"
@@ -103,38 +105,25 @@ func (ui *ui) Disp() {
 
 	treeview := widgets.NewQTreeView(nil)
 	//model := NewCustomTreeModel(nil)
-	model2 := gui.NewQStandardItemModel(nil)
-	ui.treeModel = model2
-	item1 := gui.NewQStandardItem2("vahi-daemon")
-	model2.SetItem2(0, item1)
-	item2 := gui.NewQStandardItem2("hello")
-	item1.AppendRow2(item2)
-	item3 := gui.NewQStandardItem2("world")
-	item1.AppendRow2(item3)
-	item4 := gui.NewQStandardItem2("111")
-	item3.AppendRow2(item4)
-	item3.Parent()
-	item5 := gui.NewQStandardItem2("change")
-	model2.SetItem2(0, item5)
-	item6 := gui.NewQStandardItem2("222")
-	item5.AppendRow2(item6)
-	treeview.SetModel(model2)
-	ui.TestTree()
+	ui.treeModel = gui.NewQStandardItemModel(nil)
+	treeview.SetModel(ui.treeModel)
 
 	tableview := widgets.NewQTableView(nil)
 	tableview.SetSelectionMode(widgets.QAbstractItemView__SingleSelection)
 	tableview.SetSelectionBehavior(widgets.QAbstractItemView__SelectRows)
 	ui.model = NewCustomTableModel(nil)
 	tableview.ConnectClicked(func(index *core.QModelIndex) {
-		/*
-			offset := ui.model.Index(index.Row(), 0, nil).Data(0).ToLongLong(nil)
-			typ := ui.model.Index(index.Row(), 0, nil).Data(0).ToString()
-			tree, _ := ui.detailReader.ParseDetail(int(offset), typ)
-			var item *gui.QStandardItem
-			ret := tree.Traverse(callback, item)
-			item = ret.(*gui.QStandardItem)
-			ui.treeModel.SetItem2(0, item)
-		*/
+		offset := ui.model.Index(index.Row(), 0, nil).Data(0).ToLongLong(nil)
+		typ := ui.model.Index(index.Row(), 1, nil).Data(0).ToString()
+		tree, err := ui.detailReader.ParseDetail(offset, typ)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		var item *gui.QStandardItem
+		ret := tree.Traverse(callback, item)
+		item = ret.(*gui.QStandardItem)
+		ui.treeModel.SetItem2(0, item)
 
 	})
 	tableview.SetModel(ui.model)
@@ -170,41 +159,11 @@ func (ui *ui) ShowData(ch chan *reader.PktInfo) {
 
 func callback(node *ntree.NTree, levelChange bool, opaque interface{}) interface{} {
 	ptr := opaque.(*gui.QStandardItem)
-	item := gui.NewQStandardItem2(node.Data.(string))
+	data := node.Data.(*reader.Item)
+	item := gui.NewQStandardItem2(fmt.Sprintf("%s : 0x%x", data.K, data.V))
 	if ptr == nil {
 		return item
 	}
 	ptr.AppendRow2(item)
 	return item
-}
-
-func (ui *ui) TestTree() {
-	root := ntree.New("root")
-
-	dog := ntree.New("dog")
-	cat := ntree.New("cat")
-	pig := ntree.New("pig")
-	ani := ntree.New("animal")
-	ani.Append(dog)
-	ani.Append(cat)
-	ani.Append(pig)
-
-	jz := ntree.New("饺子")
-	bi := ntree.New("饼")
-
-	chb := ntree.New("葱花饼")
-	tb := ntree.New("糖饼")
-	bi.Append(chb)
-	bi.Append(tb)
-	food := ntree.New("food")
-	food.Append(jz)
-	food.Append(bi)
-
-	root.Append(ani)
-	root.Append(food)
-	var item *gui.QStandardItem
-	//item := gui.NewQStandardItem2("root")
-	ret := root.Traverse(callback, item)
-	item = ret.(*gui.QStandardItem)
-	ui.treeModel.SetItem2(0, item)
 }

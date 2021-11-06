@@ -4,6 +4,7 @@ import (
 	"bitreader"
 	"log"
 	"ntree"
+	"reader"
 )
 
 type DataManager struct {
@@ -17,14 +18,14 @@ func NewDataManager(br *bitreader.BitReader, tree *ntree.NTree) *DataManager {
 
 func (dm *DataManager) _decode(items Items, output *ntree.NTree) error {
 	for _, item := range items {
-		ret, err := dm.br.Read(uint(item.v))
+		ret, err := dm.br.Read(uint(item.V))
 		if err != nil {
-			log.Println("read", item.k, item.v, "err", err)
+			log.Println("read", item.K, item.V, "err", err)
 			return err
 		}
-		data := &Item{
-			k: item.k,
-			v: ret,
+		data := &reader.Item{
+			K: item.K,
+			V: ret,
 		}
 		t := ntree.New(data)
 		output.Append(t)
@@ -41,9 +42,9 @@ func (dm *DataManager) decodeChild(items Items, tree *ntree.NTree) error {
 }
 
 func (dm *DataManager) set(key string, val uint64) {
-	item := &Item{
-		k: key,
-		v: val,
+	item := &reader.Item{
+		K: key,
+		V: val,
 	}
 	t := ntree.New(item)
 	dm.tree.Append(t)
@@ -51,7 +52,7 @@ func (dm *DataManager) set(key string, val uint64) {
 
 func (dm *DataManager) get(tree *ntree.NTree, key string) *ntree.NTree {
 	t := tree.Get(func(data interface{}) bool {
-		return data.(*Item).k == key
+		return data.(*reader.Item).K == key
 	})
 	return t
 }
@@ -59,7 +60,7 @@ func (dm *DataManager) get(tree *ntree.NTree, key string) *ntree.NTree {
 func (dm *DataManager) getDataFromTree(tree *ntree.NTree, key string) uint64 {
 	t := dm.get(tree, key)
 	//log.Println(key)
-	return t.GetData().(*Item).v
+	return t.GetData().(*reader.Item).V
 }
 
 func (dm *DataManager) getData(key string) uint64 {
@@ -73,7 +74,7 @@ func (dm *DataManager) read(key string, len uint) uint64 {
 }
 
 func callback(node *ntree.NTree, levelChange bool, opaque interface{}) interface{} {
-	log.Printf("%s : 0x%x\n", node.Data.(*Item).k, node.Data.(*Item).v)
+	log.Printf("%s : 0x%x\n", node.Data.(*reader.Item).K, node.Data.(*reader.Item).V)
 	return nil
 }
 

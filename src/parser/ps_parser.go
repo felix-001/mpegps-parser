@@ -42,15 +42,10 @@ var (
 	ErrCheckPayloadLen   = errors.New("check payload length error")
 	ErrCheckInputFile    = errors.New("check input file error")
 	ErrCheckLength       = errors.New("check length error")
+	ErrCheckTyp          = errors.New("check typ error")
 )
 
-// map遍历是无序的
-type Item struct {
-	k string
-	v uint64
-}
-
-type Items []Item
+type Items []reader.Item
 
 var (
 	packHeader = Items{
@@ -216,8 +211,6 @@ func (decoder *PsDecoder) decodePkt(startCode uint32) (typ string, t *ntree.NTre
 	case StartCodeSYS:
 		typ = "system header"
 		t, err = decoder.decodeSystemHeader()
-		offset, _ := decoder.br.Offset()
-		log.Println("StartCodeSYS", offset)
 	case StartCodeMAP:
 		typ = "program stream map"
 		t, err = decoder.decodeProgramStreamMap()
@@ -233,11 +226,10 @@ func (decoder *PsDecoder) decodePkt(startCode uint32) (typ string, t *ntree.NTre
 	return
 }
 
-func (decoder *PsDecoder) sendBasic(startCode uint32, typ, status string) {
+func (decoder *PsDecoder) sendBasic(startCode uint32, typ, status string, offset int64) {
 	if startCode == StartCodePS {
 		return
 	}
-	offset, _ := decoder.br.Offset()
 	pktInfo := &reader.PktInfo{
 		Offset: uint64(offset),
 		Typ:    typ,
@@ -268,7 +260,7 @@ func (decoder *PsDecoder) decodePkts() error {
 		if err != nil {
 			status = "Error"
 		}
-		decoder.sendBasic(uint32(startCode), typ, status)
+		decoder.sendBasic(uint32(startCode), typ, status, offset)
 		offset, _ = br.Offset()
 	}
 	decoder.showInfo()
@@ -276,7 +268,7 @@ func (decoder *PsDecoder) decodePkts() error {
 }
 
 func (dec *PsDecoder) decodeSystemHeader() (*ntree.NTree, error) {
-	t := ntree.New(&Item{k: "system header"})
+	t := ntree.New(&reader.Item{K: "system header"})
 	dm := NewDataManager(dec.br, t)
 	dm.decode(systemHeader)
 	nextbits, err := dec.br.Peek(1)
@@ -299,14 +291,14 @@ func (dm *DataManager) skipBytes(size uint64) {
 }
 
 func (dec *PsDecoder) decodeProgramStreamMap() (*ntree.NTree, error) {
-	t := ntree.New(&Item{k: "program stream map"})
+	t := ntree.New(&reader.Item{K: "program stream map"})
 	dm := NewDataManager(dec.br, t)
 	if err := dm.decode(programStreamMap); err != nil {
 		return nil, err
 	}
 	dm.skipBytes(dm.getData("program_stream_info_length"))
 
-	esTree := ntree.New(&Item{k: "elementary stream map"})
+	esTree := ntree.New(&reader.Item{K: "elementary stream map"})
 	t.Append(esTree)
 	elementary_stream_map_length := dm.read("elementary_stream_map_length", 16)
 	//dm.dump()
@@ -325,7 +317,7 @@ func (dec *PsDecoder) decodeProgramStreamMap() (*ntree.NTree, error) {
 			return nil, ErrCheckLength
 		}
 		elementary_stream_map_length -= (4 + elementary_stream_info_length)
-		log.Println("elementary_stream_map_length", elementary_stream_map_length)
+		//log.Println("elementary_stream_map_length", elementary_stream_map_length)
 	}
 	dm.read("CRC_32", 32)
 	return t, nil
@@ -437,7 +429,7 @@ func (dec *PsDecoder) getPesPayloadLen(dm *DataManager) uint64 {
 
 func (dec *PsDecoder) decodeAudioPes() (*ntree.NTree, error) {
 	dec.totalAudioFrameCnt++
-	t := ntree.New(&Item{k: "audio pes"})
+	t := ntree.New(&reader.Item{K: "audio pes"})
 	dm := NewDataManager(dec.br, t)
 	payload, err := dec.decodePES(AudioPES, dm)
 	if err != nil {
@@ -560,18 +552,19 @@ func (dec *PsDecoder) decodePES(pesType int, dm *DataManager) ([]byte, error) {
 
 func (dec *PsDecoder) decodeVideoPes() (*ntree.NTree, error) {
 	dec.totalVideoFrameCnt++
-	t := ntree.New(&Item{k: "video pes"})
+	t := ntree.New(&reader.Item{K: "video pes"})
 	dm := NewDataManager(dec.br, t)
 	payload, err := dec.decodePES(VideoPES, dm)
 	if err != nil {
-		return nil, err
+		return t, err
 	}
 	dec.decodeH264(payload)
+	dm.dump()
 	return t, nil
 }
 
 func (decoder *PsDecoder) decodePsHeader() (*ntree.NTree, error) {
-	t := ntree.New(&Item{k: "pack header"})
+	t := ntree.New(&reader.Item{K: "pack header"})
 	dm := NewDataManager(decoder.br, t)
 	dm.decode(packHeader)
 	//log.Printf("%+v offset:%d\n", dm.m, offset)
@@ -619,16 +612,27 @@ func (dec *PsDecoder) openAudioFile() error {
 	return nil
 }
 
-func (decoder *PsDecoder) ParseDetail(offset int, typ string) (*ntree.NTree, error) {
+func (decoder *PsDecoder) ParseDetail(offset int64, typ string) (t *ntree.NTree, err error) {
+	decoder.br.Seek(offset)
+	log.Println("typ:", typ)
 	switch typ {
 	case "video pes":
-		return decoder.decodeVideoPes()
+		t, err = decoder.decodeVideoPes()
 	case "audio pes":
-		return decoder.decodeAudioPes()
+		t, err = decoder.decodeAudioPes()
 	case "program stream map":
-		return decoder.decodeProgramStreamMap()
+		t, err = decoder.decodeProgramStreamMap()
+	default:
+		err = ErrCheckTyp
 	}
-	return nil, nil
+	if err == nil || err == ErrCheckPayloadLen {
+		dm := NewDataManager(decoder.br, t)
+		dm.dump()
+	}
+	if err == ErrCheckPayloadLen {
+		err = nil
+	}
+	return
 }
 
 func (dec *PsDecoder) Run() {
