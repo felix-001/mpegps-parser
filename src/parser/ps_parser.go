@@ -559,7 +559,6 @@ func (dec *PsDecoder) decodeVideoPes() (*ntree.NTree, error) {
 		return t, err
 	}
 	dec.decodeH264(payload)
-	dm.dump()
 	return t, nil
 }
 
@@ -613,8 +612,8 @@ func (dec *PsDecoder) openAudioFile() error {
 }
 
 func (decoder *PsDecoder) ParseDetail(offset int64, typ string) (t *ntree.NTree, err error) {
-	decoder.br.Seek(offset)
-	log.Println("typ:", typ)
+	decoder.br.Seek(offset + 4)
+	//log.Println("typ:", typ)
 	switch typ {
 	case "video pes":
 		t, err = decoder.decodeVideoPes()
@@ -625,10 +624,12 @@ func (decoder *PsDecoder) ParseDetail(offset int64, typ string) (t *ntree.NTree,
 	default:
 		err = ErrCheckTyp
 	}
-	if err == nil || err == ErrCheckPayloadLen {
-		dm := NewDataManager(decoder.br, t)
-		dm.dump()
-	}
+	/*
+		if err == nil || err == ErrCheckPayloadLen {
+			dm := NewDataManager(decoder.br, t)
+			dm.dump()
+		}
+	*/
 	if err == ErrCheckPayloadLen {
 		err = nil
 	}
