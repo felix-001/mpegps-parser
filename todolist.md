@@ -1,0 +1,8 @@
+- mpeg ps
+- mpeg ts
+- flv
+- rtp over tcp
+- h264
+- h265
+- aac
+- mp4

@@ -10,6 +10,16 @@ import (
 
 const max int = 100
 
+// TODO 待实现
+// - mpeg ps
+// - mpeg ts
+// - flv
+// - rtp over tcp
+// - h264
+// - h265
+// - aac
+// - mp4
+
 func main() {
 	log.SetFlags(log.Lshortfile)
 	ch := make(chan *reader.PktInfo, max)

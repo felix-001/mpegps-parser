@@ -124,11 +124,19 @@ func (ui *ui) Disp() {
 		ret := tree.Traverse(callback, item)
 		item = ret.(*gui.QStandardItem)
 		ui.treeModel.SetItem2(0, item)
+		treeview.ExpandAllDefault()
 
 	})
 	tableview.SetModel(ui.model)
 
 	textedit := widgets.NewQTextEdit(nil)
+	// TODO: 待实现
+	// 1.点击表格中某一个条目，对应的hex view能显示
+	// 2.点击详细信息的某一个条目，对应的hex view能显示
+	// 3.滚动条向下滑动，相应的内容跟着动
+	// 4.支持搜索hex
+	// 5.支持指定offset查看
+	// 6.点击详细信息的某一个条目，对应的hex view高亮
 
 	layout := widgets.NewQGridLayout2()
 	layout.AddWidget(tableview)
@@ -146,7 +154,7 @@ func (ui *ui) Disp() {
 func (ui *ui) ShowData(ch chan *reader.PktInfo) {
 	for {
 		if data, ok := <-ch; ok {
-			// todo tabview 也使用standrand model
+			// TODO: tabview 也使用standrand model
 			item := TableItem{
 				Offset:  int64(data.Offset),
 				PktType: data.Typ,
@@ -160,7 +168,11 @@ func (ui *ui) ShowData(ch chan *reader.PktInfo) {
 func callback(node *ntree.NTree, levelChange bool, opaque interface{}) interface{} {
 	ptr := opaque.(*gui.QStandardItem)
 	data := node.Data.(*reader.Item)
-	item := gui.NewQStandardItem2(fmt.Sprintf("%s : 0x%x", data.K, data.V))
+	s := fmt.Sprintf("%s : 0x%x", data.K, data.V)
+	if data.V == 0xFFFF {
+		s = fmt.Sprintf("%s", data.K)
+	}
+	item := gui.NewQStandardItem2(s)
 	if ptr == nil {
 		return item
 	}

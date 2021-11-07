@@ -104,7 +104,13 @@ func (br *BitReader) Read(n uint) (result uint64, err error) {
 	return
 }
 
+func (br *BitReader) reset() {
+	br.remain = 0
+	br.data = 0
+}
+
 func (br *BitReader) Seek(offset int64) error {
+	br.reset()
 	_, err := br.r.Seek(offset, io.SeekStart)
 	return err
 }

@@ -51,30 +51,30 @@ var (
 	packHeader = Items{
 		{"fixed", 2},
 		{"system_clock_reference_base1", 3},
-		{"marker_bit1", 1},
+		{"marker_bit", 1},
 		{"system_clock_reference_base2", 15},
-		{"marker_bit2", 1},
+		{"marker_bit", 1},
 		{"system_clock_reference_base3", 15},
-		{"marker_bit3", 1},
+		{"marker_bit", 1},
 		{"system_clock_reference_extension", 9},
-		{"marker_bit4", 1},
+		{"marker_bit", 1},
 		{"program_mux_rate", 22},
-		{"marker_bit5", 1},
-		{"marker_bit6", 1},
+		{"marker_bit", 1},
+		{"marker_bit", 1},
 		{"resvrved", 5},
 		{"pack_stuffing_length", 3},
 	}
 	systemHeader = Items{
 		{"header_length", 16},
-		{"marker_bit1", 1},
+		{"marker_bit", 1},
 		{"rate_bound", 22},
-		{"marker_bit2", 1},
+		{"marker_bit", 1},
 		{"audio_bound", 6},
 		{"fixed_flag", 1},
 		{"CSPS_flag", 1},
 		{"system_audio_lock_flag", 1},
 		{"system_video_lock_flag", 1},
-		{"marker_bit3", 1},
+		{"marker_bit", 1},
 		{"video_bound", 5},
 		{"packet_rate_restriction_flag", 1},
 		{"reserved_bits", 7},
@@ -88,9 +88,9 @@ var (
 	programStreamMap = Items{
 		{"program_stream_map_length", 16},
 		{"current_next_indicator", 1},
-		{"reserved1", 2},
+		{"reserved", 2},
 		{"program_stream_map_version", 5},
-		{"reserved2", 7},
+		{"reserved", 7},
 		{"marker_bit", 1},
 		{"program_stream_info_length", 16},
 	}
@@ -102,43 +102,43 @@ var (
 	ptsInfo = Items{
 		{"fixed", 4},
 		{"PTS1", 3},
-		{"marker_bit1", 1},
+		{"marker_bit", 1},
 		{"PTS2", 15},
-		{"marker_bit2", 1},
+		{"marker_bit", 1},
 		{"PTS3", 15},
-		{"marker_bit3", 1},
+		{"marker_bit", 1},
 	}
 	ptsdtsInfo = Items{
-		{"fixed1", 4},
+		{"fixed", 4},
 		{"PTS1", 3},
-		{"marker_bit1", 1},
+		{"marker_bit", 1},
 		{"PTS2", 15},
-		{"marker_bit2", 1},
+		{"marker_bit", 1},
 		{"PTS3", 15},
-		{"marker_bit3", 1},
-		{"fixed2", 4},
+		{"marker_bit", 1},
+		{"fixed", 4},
 		{"DTS1", 3},
-		{"marker_bit4", 1},
+		{"marker_bit", 1},
 		{"DTS2", 15},
-		{"marker_bit5", 1},
+		{"marker_bit", 1},
 		{"DTS3", 15},
-		{"marker_bit6", 1},
+		{"marker_bit", 1},
 	}
 	escrInfo = Items{
 		{"reserved", 1},
 		{"ESCR_base1", 3},
-		{"marker_bit1", 1},
+		{"marker_bit", 1},
 		{"ESCR_base2", 15},
-		{"marker_bit2", 1},
+		{"marker_bit", 1},
 		{"ESCR_base3", 15},
-		{"marker_bit3", 1},
+		{"marker_bit", 1},
 		{"ESCR_extension", 9},
-		{"marker_bit4", 1},
+		{"marker_bit", 1},
 	}
 	esRateInfo = Items{
-		{"marker_bit1", 1},
+		{"marker_bit", 1},
 		{"ES_rate", 22},
-		{"marker_bit2", 1},
+		{"marker_bit", 1},
 	}
 	pes = Items{
 		{"PES_packet_length", 16},
@@ -171,9 +171,9 @@ var (
 		{"frequency_truncation", 2},
 	}
 	sequenceCount = Items{
-		{"marker_bit1", 1},
+		{"marker_bit", 1},
 		{"program_packet_sequence_counter", 7},
-		{"marker_bit2", 1},
+		{"marker_bit", 1},
 		{"MPEG1_MPEG2_identifier", 1},
 		{"original_stuff_length", 6},
 	}
@@ -227,9 +227,6 @@ func (decoder *PsDecoder) decodePkt(startCode uint32) (typ string, t *ntree.NTre
 }
 
 func (decoder *PsDecoder) sendBasic(startCode uint32, typ, status string, offset int64) {
-	if startCode == StartCodePS {
-		return
-	}
 	pktInfo := &reader.PktInfo{
 		Offset: uint64(offset),
 		Typ:    typ,
@@ -268,7 +265,7 @@ func (decoder *PsDecoder) decodePkts() error {
 }
 
 func (dec *PsDecoder) decodeSystemHeader() (*ntree.NTree, error) {
-	t := ntree.New(&reader.Item{K: "system header"})
+	t := ntree.New(&reader.Item{K: "system header", V: 0xFFFF})
 	dm := NewDataManager(dec.br, t)
 	dm.decode(systemHeader)
 	nextbits, err := dec.br.Peek(1)
@@ -291,16 +288,16 @@ func (dm *DataManager) skipBytes(size uint64) {
 }
 
 func (dec *PsDecoder) decodeProgramStreamMap() (*ntree.NTree, error) {
-	t := ntree.New(&reader.Item{K: "program stream map"})
+	t := ntree.New(&reader.Item{K: "program stream map", V: 0xFFFF})
 	dm := NewDataManager(dec.br, t)
 	if err := dm.decode(programStreamMap); err != nil {
 		return nil, err
 	}
 	dm.skipBytes(dm.getData("program_stream_info_length"))
 
+	elementary_stream_map_length := dm.read("elementary_stream_map_length", 16)
 	esTree := ntree.New(&reader.Item{K: "elementary stream map"})
 	t.Append(esTree)
-	elementary_stream_map_length := dm.read("elementary_stream_map_length", 16)
 	//dm.dump()
 	//log.Println("elementary_stream_map_length", elementary_stream_map_length)
 	for elementary_stream_map_length > 0 {
@@ -429,7 +426,7 @@ func (dec *PsDecoder) getPesPayloadLen(dm *DataManager) uint64 {
 
 func (dec *PsDecoder) decodeAudioPes() (*ntree.NTree, error) {
 	dec.totalAudioFrameCnt++
-	t := ntree.New(&reader.Item{K: "audio pes"})
+	t := ntree.New(&reader.Item{K: "audio pes", V: 0xFFFF})
 	dm := NewDataManager(dec.br, t)
 	payload, err := dec.decodePES(AudioPES, dm)
 	if err != nil {
@@ -552,7 +549,7 @@ func (dec *PsDecoder) decodePES(pesType int, dm *DataManager) ([]byte, error) {
 
 func (dec *PsDecoder) decodeVideoPes() (*ntree.NTree, error) {
 	dec.totalVideoFrameCnt++
-	t := ntree.New(&reader.Item{K: "video pes"})
+	t := ntree.New(&reader.Item{K: "video pes", V: 0xFFFF})
 	dm := NewDataManager(dec.br, t)
 	payload, err := dec.decodePES(VideoPES, dm)
 	if err != nil {
@@ -563,7 +560,7 @@ func (dec *PsDecoder) decodeVideoPes() (*ntree.NTree, error) {
 }
 
 func (decoder *PsDecoder) decodePsHeader() (*ntree.NTree, error) {
-	t := ntree.New(&reader.Item{K: "pack header"})
+	t := ntree.New(&reader.Item{K: "pack header", V: 0xFFFF})
 	dm := NewDataManager(decoder.br, t)
 	dm.decode(packHeader)
 	//log.Printf("%+v offset:%d\n", dm.m, offset)
@@ -612,9 +609,12 @@ func (dec *PsDecoder) openAudioFile() error {
 }
 
 func (decoder *PsDecoder) ParseDetail(offset int64, typ string) (t *ntree.NTree, err error) {
+	//log.Println("offset:", offset+4)
 	decoder.br.Seek(offset + 4)
 	//log.Println("typ:", typ)
 	switch typ {
+	case "pack header":
+		t, err = decoder.decodePsHeader()
 	case "video pes":
 		t, err = decoder.decodeVideoPes()
 	case "audio pes":
